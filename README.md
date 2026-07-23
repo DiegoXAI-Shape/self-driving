@@ -44,6 +44,10 @@ graph LR
 
 En la ciencia y la ingeniería de IA rigurosa, documentar las fallas y cuellos de botella de convergencia es tan importante como celebrar los éxitos. A continuación se detallan los hallazgos analíticos obtenidos al entrenar la arquitectura desde cero (*from scratch*):
 
+### Evidencia Visual del Desempeño
+![Muestra de Evaluación Fallida](./docs/assets/eval_sample_failed.png)
+*Figura 1: Muestra de evaluación del modelo sobre el episodio de validación inédito `episode_0012`. Se observa una divergencia severa en la trayectoria predicha por el modelo (línea roja punteada) respecto al Ground Truth (línea verde continua), evidenciando la falta de convergencia del encoder visual no pre-entrenado.*
+
 ### Problema 1: Cold-Start en Mamba Visual (*Training from Scratch*)
 * **Diagnóstico:** Entrenar un encoder visual `VisionMambaEncoder` desde cero con una muestra limitada ($\sim 2,300$ secuencias temporales) no proporciona suficientes primitivas visuales ni invariancias espaciales (bordes, profundidades, relaciones de aspecto).
 * **Impacto:** Al no haber convergido los filtros 2D básicos, las características proyectadas al plano 3D mediante IPM resultaron ruidosas, impidiendo que la cabeza de planificación asociara patrones visuales con trayectorias reales.
