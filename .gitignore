@@ -1,0 +1,62 @@
+# ==============================================================================
+# HELIOSKRILL — .gitignore
+# Configuración para evitar subir datasets pesados, pesos y temporales a GitHub
+# ==============================================================================
+
+# --- Python & Caches ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+
+# --- Entornos Virtuales ---
+.venv/
+venv/
+env/
+ENV/
+build/
+dist/
+*.egg-info/
+
+# --- Datasets de CARLA y Archivos Pesados ---
+data/
+data/*
+data/Perception/
+data/Perception_resized/
+data/Location/
+data/Planning/
+data/Control/
+data/Prediction/
+*.npy
+*.npz
+
+# --- Pesos del Modelo y Checkpoints (.pth, .pt) ---
+checkpoints/
+checkpoints/*
+*.pth
+*.pt
+*.bin
+*.onnx
+*.engine
+*.safetensors
+
+# --- Logs de TensorBoard y Métricas Temporales ---
+events.out.tfevents.*
+*.tfevents
+
+# --- Imágenes de Evaluación Pesadas ---
+eval_results/visualizations/
+*.png
+*.jpg
+*.jpeg
+
+# --- IDEs y Sistema Operativo ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
