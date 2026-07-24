@@ -35,8 +35,8 @@ cv2.setNumThreads(0)
 
 # Add project root to sys.path for absolute imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from models.modules.BEV_perception import BEVPerceptionNet
-from scripts.train_vim import CARLADataset, compute_planning_metrics, compute_temporal_metrics_complete
+from models.modules.BEV_perception_v2 import BEVPerceptionNetV2 as BEVPerceptionNet
+from models.dataset import CARLADataset, compute_planning_metrics, compute_temporal_metrics_complete
 
 # Tesla 8-camera configuration labels
 CAMERA_NAMES = [
@@ -59,8 +59,7 @@ def load_model(checkpoint_path, device, img_size=(304, 400)):
         num_waypoints=10,
         bev_height=400,
         bev_width=400,
-        grid_resolution=0.25,
-        img_size=img_size
+        grid_resolution=0.25
     ).to(device)
 
     if not os.path.exists(checkpoint_path):
