@@ -70,15 +70,15 @@ graph LR
 ### Lecciones del Experimento 2 (DINOv2 + LoRA + GroupNorm)
 * **Éxito en Espacialidad Sub-Métrica ($0.49\text{m}$ ADE):** La integración de DINOv2 pre-entrenado resolvió instantáneamente la comprensión espacial de la carretera, logrando que el vehículo se mantenga en el carril a menos de medio metro de error.
 * **Fenómeno de Repetición Temporal:** Al proyectar el fotograma actual sobre la secuencia Mamba, la red aprendió a la perfección las trayectorias rectas ($0.49\text{m}$ ADE), pero mostró inercia en giros de $90^\circ$ al faltar señal de movimiento óptico entre fotogramas pasados.
-* **Sesgo de Escala en Yaw:** La función `HuberLoss` priorizó los errores de posición en metros ($X, Y$) sobre la orientación ($Yaw = 52.8^\circ$), sugiriendo la necesidad de una cabeza trigonométrica ponderada $(\sin(\theta), \cos(\theta))$.
+* **Sesgo de Escala en Yaw:** La función `HuberLoss` priorizó los errores de posición en metros (`X, Y`) sobre la orientación (`Yaw = 52.8°`), sugiriendo la necesidad de una cabeza trigonométrica ponderada `(sin(θ), cos(θ))`.
 
 ---
 
 ## 5. Hoja de Ruta — Experimento No. 3
 
 1. **Entrada Temporal Verdadera en Espacio BEV:** Extraer características visuales de los fotogramas pasados reales y entregárselas a `TemporalMamba` para que calcule velocidad real y detección de giros en intersecciones.
-2. **Cabeza de Orientación Trigonométrica:** Regresar el ángulo de guiñada mediante pares trigonométricos $(\sin(\theta), \cos(\theta))$ acotados.
-3. **Pérdida Ponderada Multitarea:** Aplicar pesos diferenciados $\mathcal{L} = \mathcal{L}_{\text{pos}} + 0.1 \cdot \mathcal{L}_{\text{yaw}}$ para equilibrar la precisión de posición y rotación.
+2. **Cabeza de Orientación Trigonométrica:** Regresar el ángulo de guiñada mediante pares trigonométricos `(sin(θ), cos(θ))` acotados.
+3. **Pérdida Ponderada Multitarea:** Aplicar pesos diferenciados `L_total = L_pos + 0.1 * L_yaw` para equilibrar la precisión de posición y rotación.
 
 ---
 
