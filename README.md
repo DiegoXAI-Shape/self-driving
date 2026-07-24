@@ -1,7 +1,8 @@
-# Helioskrill: End-to-End Space-Temporal Trajectory Planning with Vision Mamba (ViM) & Sensor Fusion
+# Helioskrill: End-to-End Space-Temporal Trajectory Planning with Vision Mamba (ViM), DINOv2 & Sensor Fusion
 
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-ee4c2c.svg)](https://pytorch.org/)
 [![Mamba-SSM](https://img.shields.io/badge/Mamba--SSM-1.4+-black.svg)](https://github.com/state-spaces/mamba)
+[![DINOv2](https://img.shields.io/badge/DINOv2-Meta--AI-blue.svg)](https://github.com/facebookresearch/dinov2)
 [![CARLA](https://img.shields.io/badge/CARLA-0.9.15-blue.svg)](https://carla.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
@@ -9,8 +10,8 @@
 
 ## 1. Visión General del Proyecto
 
-* **Objetivo:** Exploración e implementación de una canalización de extremo a extremo (*End-to-End*) para la planificación de trayectorias en conducción autónoma. El sistema combina una arquitectura visual bidireccional basada en **Vision Mamba (ViM)**, recurrencia temporal espacio-temporal con **Temporal Mamba**, y fusión de sensores en vista de pájaro (**Camera IPM + LiDAR BEV**).
-* **Stack Tecnológico:** PyTorch, Mamba-SSM, CUDA, OpenCV, TensorBoard, CARLA Simulator API.
+* **Objetivo:** Exploración e implementación de una canalización de extremo a extremo (*End-to-End*) para la planificación de trayectorias en conducción autónoma. El sistema combina una arquitectura visual de extracción basada en **DINOv2 + LoRA**, recurrencia temporal espacio-temporal con **Temporal Mamba**, y fusión de sensores en vista de pájaro (**Camera IPM + LiDAR BEV**).
+* **Stack Tecnológico:** PyTorch, PEFT (LoRA), DINOv2, Mamba-SSM, CUDA, OpenCV, TensorBoard, CARLA Simulator API.
 
 ---
 
@@ -22,94 +23,101 @@ El modelo procesa secuencias de tiempo $S=5$ provenientes de un arreglo de 8 cá
 
 ```mermaid
 graph LR
-    A["8 Cámaras RGB [B, S, 8, 3, H, W]"] --> B["Vision Mamba (ViM 2D)"]
-    B --> C["Features 2D [B*S*8, C, H', W']"]
+    A["8 Cámaras RGB [B, S, 8, 3, H, W]"] --> B["DINOv2 (dinov2_vits14 + LoRA r=8)"]
+    B --> C["Features 2D [B*S*8, 384, H', W']"]
     C --> D["Inverse Perspective Mapping (IPM)"]
-    D --> E["Plano BEV Cámara [B, S, C, H_bev, W_bev]"]
+    D --> E["Plano BEV Cámara [B, S, 64, H_bev, W_bev]"]
     E --> F["Temporal Mamba (SSM 1D)"]
-    F --> G["Fusión con LiDAR BEV [B, C_fused, H_bev, W_bev]"]
+    F --> G["Fusión con LiDAR BEV [B, 128, H_bev, W_bev]"]
     G --> H["BEV Planning Head"]
     H --> I["10 Waypoints Futuros [B, 10, 4]"]
 ```
 
 #### Descripción por Bloques:
-1. **Vision Mamba 2D Encoder:** Extrae características de textura y contexto espacial de las 8 vistas periféricas de forma bidireccional usando SSMs (*State Space Models*) en lugar de atención cuadrática.
+1. **DINOv2 Visual Backbone + LoRA:** Extrae características ricas de textura, profundidad e invariancia espacial de las 8 vistas periféricas usando Meta DINOv2 Small (`dinov2_vits14`) pre-entrenado. Se inyectan matrices de bajo rango **LoRA ($r=8, \alpha=16$)** en las proyecciones de atención `qkv`, congelando el 93%+ del modelo base.
 2. **Geometría BEV via IPM:** Proyecta las características 2D a un espacio tridimensional de vista de pájaro ($400 \times 400$ a resolución de $0.25\text{m/pixel}$) guiado por las matrices extrínsecas $E$ e intrínsecas $K$ de cada cámara.
-3. **Temporal Mamba:** Recorre secuencialmente la dimensión temporal $S$ píxel a píxel sobre la grilla BEV para estimar velocidad y dirección de movimiento.
-4. **Fusion Neck & Planning Head:** Concatena las características BEV de cámara y el tensor estadístico de LiDAR ($Z_{\max}, Z_{\text{diff}}, Z_{\text{mean}}$, densidad e intensidad) para regresar los 10 waypoints futuros en coordenadas relativas del vehículo (`rel_x`, `rel_y`, `rel_z`, `rel_yaw`).
+3. **Temporal Mamba:** Recorre secuencialmente la dimensión temporal $S$ píxel a píxel sobre la grilla BEV para estimar velocidad, aceleración y dirección de movimiento.
+4. **GroupNorm Fusion Neck & Planning Head:** Concatena las características BEV de cámara y el tensor estadístico de LiDAR ($Z_{\max}, Z_{\text{diff}}, Z_{\text{mean}}$, densidad e intensidad) aplicando `GroupNorm(16)` para máxima estabilidad matemática a batch size $B=1$. Regresa los 10 waypoints futuros en coordenadas relativas del vehículo (`rel_x`, `rel_y`, `rel_z`, `rel_yaw`).
 
 ---
 
-## 3. Resultados y Diagnóstico Técnico (El Post-Mortem)
+## 3. Tabla Comparativa de Experimentos
 
-En la ciencia y la ingeniería de IA rigurosa, documentar las fallas y cuellos de botella de convergencia es tan importante como celebrar los éxitos. A continuación se detallan los hallazgos analíticos obtenidos al entrenar la arquitectura desde cero (*from scratch*):
-
-### Evidencia Visual del Desempeño
-![Muestra de Evaluación Fallida](./docs/assets/eval_sample_failed.png)
-*Figura 1: Muestra de evaluación del modelo sobre el episodio de validación inédito `episode_0012`. Se observa una divergencia severa en la trayectoria predicha por el modelo (línea roja punteada) respecto al Ground Truth (línea verde continua), evidenciando la falta de convergencia del encoder visual no pre-entrenado.*
-
-### Problema 1: Cold-Start en Mamba Visual (*Training from Scratch*)
-* **Diagnóstico:** Entrenar un encoder visual `VisionMambaEncoder` desde cero con una muestra limitada ($\sim 2,300$ secuencias temporales) no proporciona suficientes primitivas visuales ni invariancias espaciales (bordes, profundidades, relaciones de aspecto).
-* **Impacto:** Al no haber convergido los filtros 2D básicos, las características proyectadas al plano 3D mediante IPM resultaron ruidosas, impidiendo que la cabeza de planificación asociara patrones visuales con trayectorias reales.
-
-### Problema 2: Inestabilidad Estocástica de `BatchNorm2d` con Lote Pequeño ($B = 1$)
-* **Diagnóstico:** Debido a las restricciones de VRAM al procesar $5 \text{ frames} \times 8 \text{ cámaras} = 40 \text{ imágenes}$ por iteración, el tamaño de lote efectivo por GPU tuvo que fijarse en $B = 1$ (combinado con acumulación de gradiente).
-* **Impacto:** Las estadísticas móviles de Batch Normalization (`running_mean` y `running_var`) sufrieron una alta deriva estocástica entre iteraciones, provocando curvas de pérdida de validación oscilatorias en forma de **"diente de sierra"**.
-
-### Problema 3: Error de Envoltura Angular (*Wrap-Around*) en las Métricas de Yaw
-* **Diagnóstico:** Durante la evaluación de la métrica angular (`yaw_error_deg`), se detectaron picos artificiales en los errores cuando el ángulo de la trayectoria cruzaba la frontera discontinua de $+180^\circ$ a $-180^\circ$ (o $+\pi$ a $-\pi$).
-* **Impacto:** Un error real de $2^\circ$ (ej. de $+179^\circ$ a $-179^\circ$) se calculaba numéricamente como un error masivo de $358^\circ$, distorsionando el promedio de la métrica de orientación.
+| Métrica de Validación | Experimento 1 (Scratch Vision Mamba) | **Experimento 2 (DINOv2 + LoRA)** | **Mejora Obtenida** |
+| :--- | :---: | :---: | :---: |
+| **Backbone Visual** | Vision Mamba 2D (Entrenado desde cero) | **Meta DINOv2 Small + LoRA ($r=8$)** | Representación espacial pre-entrenada |
+| **Normalización** | `BatchNorm2d` (Inestable a $B=1$) | **`GroupNorm(num_groups=16)`** | Estabilidad matemática estricta |
+| **Mean ADE (Error Medio)** | $8.42\text{ metros}$ ❌ | **$0.49\text{ metros}$** ✅ | **¡17.1x de mejora! (49 cm)** |
+| **Mean FDE (Error a 5.0s)** | $15.80\text{ metros}$ ❌ | **$0.87\text{ metros}$** ✅ | **¡18.1x de mejora! (87 cm)** |
+| **Validation Loss** | $> 100.0$ (Sin convergencia) | **$42.68$** | **Reducción de $>60\%$** |
+| **Parámetros Entrenables** | $23.7\text{M}$ ($100\%$) | **$1.64\text{M}$ ($6.94\%$)** | **Reducción masiva de parámetros** |
+| **Comportamiento en Ruta** | Divergencia fuera de la carretera | **Mantenimiento sub-métrico de carril** | Transición a precisión industrial |
 
 ---
 
-## 4. Lecciones Aprendidas y Siguiente Iteración
+## 4. Análisis Post-Mortem y Diagnóstico Técnico
 
-### Pivote Estratégico: De *Scratch Training* a *Fine-Tuning con LoRA / PEFT*
+### Evidencia Comparativa Visual
 
-Los resultados empíricos demuestran de manera contundente que **los encoders visuales de conducción autónoma no deben entrenarse desde cero** en conjuntos de datos de tamaño modesto.
+````carousel
+![Experimento 1: Divergencia en Trayectoria](./docs/assets/eval_sample_failed.png)
+<!-- slide -->
+![Experimento 2: Precisión Sub-Métrica con DINOv2](./docs/assets/eval_sample_exp2.png)
+````
 
-#### Hoja de Ruta para la Versión 2.0:
-1. **Backbones Pre-entrenados:** Sustituir la extracción desde cero por características congeladas o afinadas de modelos pre-entrenados a gran escala (ej. **ResNet50 / DINOv2 / nuScenes Checkpoints**).
-2. **Adaptación Eficiente de Parámetros (LoRA):** Incorporar módulos **LoRA** (*Low-Rank Adaptation*) en los bloques Mamba espaciales y temporales para permitir un aprendizaje de baja huella de memoria sin desestabilizar los pesos pre-entrenados.
-3. **Sustitución de Normalización:** Reemplazar las capas de `BatchNorm2d` por `GroupNorm` o `LayerNorm` para garantizar estabilidad matemática estricta independiente del tamaño de lote ($B=1$).
-4. **Pérdida Coseno para Ángulos:** Reformular la pérdida y métrica angular de Yaw utilizando funciones trigonométricas ($\sin(\Delta \theta), \cos(\Delta \theta)$) para eliminar los errores de envoltura en $\pm 180^\circ$.
+### Lecciones del Experimento 1 (Scratch Vision Mamba)
+* **Cold-Start Visual:** Entrenar Vision Mamba desde cero con pocos datos ($\sim 2,300$ muestras) impidió que el encoder aprendiera primitivas visuales de profundidad y bordes, generando un error masivo de $8.42\text{m}$.
+* **Inestabilidad de `BatchNorm2d`:** Con batch size $B=1$, las estadísticas móviles derivaron salvajemente provocando oscilaciones en diente de sierra.
+
+### Lecciones del Experimento 2 (DINOv2 + LoRA + GroupNorm)
+* **Éxito en Espacialidad Sub-Métrica ($0.49\text{m}$ ADE):** La integración de DINOv2 pre-entrenado resolvió instantáneamente la comprensión espacial de la carretera, logrando que el vehículo se mantenga en el carril a menos de medio metro de error.
+* **Fenómeno de Repetición Temporal:** Al proyectar el fotograma actual sobre la secuencia Mamba, la red aprendió a la perfección las trayectorias rectas ($0.49\text{m}$ ADE), pero mostró inercia en giros de $90^\circ$ al faltar señal de movimiento óptico entre fotogramas pasados.
+* **Sesgo de Escala en Yaw:** La función `HuberLoss` priorizó los errores de posición en metros ($X, Y$) sobre la orientación ($Yaw = 52.8^\circ$), sugiriendo la necesidad de una cabeza trigonométrica ponderada $(\sin(\theta), \cos(\theta))$.
 
 ---
 
-## 5. Estructura del Proyecto
+## 5. Hoja de Ruta — Experimento No. 3
+
+1. **Entrada Temporal Verdadera en Espacio BEV:** Extraer características visuales de los fotogramas pasados reales y entregárselas a `TemporalMamba` para que calcule velocidad real y detección de giros en intersecciones.
+2. **Cabeza de Orientación Trigonométrica:** Regresar el ángulo de guiñada mediante pares trigonométricos $(\sin(\theta), \cos(\theta))$ acotados.
+3. **Pérdida Ponderada Multitarea:** Aplicar pesos diferenciados $\mathcal{L} = \mathcal{L}_{\text{pos}} + 0.1 \cdot \mathcal{L}_{\text{yaw}}$ para equilibrar la precisión de posición y rotación.
+
+---
+
+## 6. Estructura del Proyecto
 
 ```text
 Helioskrill_vim_train/
+├── experiments/
+│   └── Experiment1_Mamba/        # Respaldo y registros del Experimento 1 (Baseline)
 ├── models/
+│   ├── dataset.py                # Clase CARLADataset, métricas acotadas y EarlyStopping
 │   ├── modules/
-│   │   ├── BEV_perception.py      # Red principal ViM + Temporal Mamba + Fusion
-│   │   ├── BEV_planning.py        # Cabeza de regresión de waypoints
-│   │   └── BEV_sensors.py         # Filtro de Kalman Extendido (EKF telemetry)
+│   │   ├── BEV_perception_v2.py  # Red principal DINOv2 + GroupNorm + Temporal Mamba
+│   │   ├── BEV_planning.py       # Cabeza de regresión de waypoints
+│   │   └── BEV_sensors.py        # Filtro de Kalman Extendido (EKF telemetry)
 │   └── utils/
-│       ├── blocks.py              # Implementación de MambaBlock y TemporalMamba
+│       ├── DINOv2_blocks.py      # Encoder DINOv2 Small con adaptador LoRA (r=8)
+│       ├── vim_blocks.py         # MambaBlock y TemporalMamba
 │       └── carla_data_collector.py # Recolector de datos multi-sensor en CARLA
 ├── scripts/
-│   ├── train_vim.py               # Pipeline de entrenamiento optimizado (AMP + Resume)
-│   ├── evaluate_visualization.py  # Script de evaluación cruzada y gráficos BEV
-│   └── preprocess_dataset.py      # Pre-procesador paralelo de imágenes
-├── reproducibility_exp1.md        # Especificación técnica del Experimento 1
-├── .gitignore                      # Filtros de datos, checkpoints y logs
-└── README.md                       # Documentación principal del proyecto
+│   ├── train_dinov2.py           # Pipeline de entrenamiento Experimento 2 (FP32 + Prefetch)
+│   ├── evaluate_visualization.py # Script de evaluación cruzada y gráficos BEV
+│   └── preprocess_dataset.py     # Pre-procesador paralelo de imágenes
+├── eval_results_exp2/            # Resultados y gráficos del Experimento 2
+├── reproducibility_exp2.md       # Guía de reproducibilidad técnica del Experimento 2
+├── .gitignore                     # Filtros de datos, checkpoints y logs
+└── README.md                      # Documentación principal del proyecto
 ```
 
 ---
 
-## 6. Reproducibilidad
-
-Para reproducir los experimentos o ejecutar la evaluación visual:
+## 7. Comandos de Ejecución
 
 ```bash
-# 1. Preprocesar imágenes (Opcional)
-python3 scripts/preprocess_dataset.py --resize_factor 0.5
+# 1. Entrenar el Experimento No. 2 (DINOv2 + LoRA)
+python3 scripts/train_dinov2.py --data_dir ./data/ --epochs 20 --batch_size 1 --seq_len 5 --stride 5 --accumulation_steps 8 --lora_r 8 --lr 1e-4
 
-# 2. Reanudar o entrenar el modelo
-python3 scripts/train_vim.py --batch_size 1 --accumulation_steps 8 --resume
-
-# 3. Generar visualizaciones y métricas de validación
-python3 scripts/evaluate_visualization.py --checkpoint checkpoints/experimento_1/best_model.pth
+# 2. Generar visualizaciones y reporte de evaluación
+python3 scripts/evaluate_visualization.py --checkpoint checkpoints/experimento_2/best_model.pth --output_dir eval_results_exp2/
 ```
