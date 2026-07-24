@@ -59,11 +59,9 @@ graph LR
 
 ### Evidencia Comparativa Visual
 
-````carousel
-![Experimento 1: Divergencia en Trayectoria](./docs/assets/eval_sample_failed.png)
-<!-- slide -->
-![Experimento 2: Precisión Sub-Métrica con DINOv2](./docs/assets/eval_sample_exp2.png)
-````
+| Experimento 1: Scratch Vision Mamba (ADE: 8.42m) | Experimento 2: DINOv2 + LoRA (ADE: 0.49m) |
+| :---: | :---: |
+| ![Experimento 1](./docs/assets/eval_sample_failed.png) | ![Experimento 2](./docs/assets/eval_sample_exp2.png) |
 
 ### Lecciones del Experimento 1 (Scratch Vision Mamba)
 * **Cold-Start Visual:** Entrenar Vision Mamba desde cero con pocos datos ($\sim 2,300$ muestras) impidió que el encoder aprendiera primitivas visuales de profundidad y bordes, generando un error masivo de $8.42\text{m}$.
