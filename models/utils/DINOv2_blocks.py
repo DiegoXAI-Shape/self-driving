@@ -94,7 +94,7 @@ def test_dinov2_encoder():
     assert out_features.shape == (B_total, 384, expected_grid[0], expected_grid[1]), \
         f"Shape mismatch! Expected {(B_total, 384, expected_grid[0], expected_grid[1])}, got {out_features.shape}"
 
-    print(f"✅ DINOv2 + LoRA test passed! Grid dimensions: {expected_grid[0]}x{expected_grid[1]}, Channels: 384.")
+    print(f"[OK] DINOv2 + LoRA test passed! Grid dimensions: {expected_grid[0]}x{expected_grid[1]}, Channels: 384.")
 
 
 if __name__ == "__main__":

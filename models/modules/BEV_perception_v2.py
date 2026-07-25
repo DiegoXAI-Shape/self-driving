@@ -9,7 +9,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".
 
 from models.utils.DINOv2_blocks import DINOv2EncoderLoRA
 from models.utils.vim_blocks import TemporalMamba
-from models.modules.BEV_planning import BEVPlanningHead
+from models.modules.BEV_planning import BEVPlanningHead, PolynomialBEVPlanningHead
 
 
 class ResidualBlock2DGroupNorm(nn.Module):
@@ -156,17 +156,25 @@ class BEVFusionNeckV2(nn.Module):
 
 class BEVPerceptionNetV2(nn.Module):
     """
-    Experiment No. 2 Industrial SOTA Model:
-    - Current frame multi-camera (N=8) visual extraction via DINOv2 + LoRA (2.8 GB VRAM max).
-    - IPM projection to Bird's Eye View (BEV) 2D plane.
-    - Lightweight Temporal Mamba sequence recurrence over time in BEV space.
-    - LiDAR BEV fusion + Waypoint planning head.
+    Industrial BEV Perception Architecture V2 for Helioskrill ViM Project.
+    Integrates DINOv2 + LoRA visual backbone, IPM projection, Temporal Mamba in BEV,
+    GroupNorm fusion neck, and Quintic Polynomial Planning Head.
     """
-    def __init__(self, num_waypoints=10, bev_height=400, bev_width=400, grid_resolution=0.25, lora_r=8):
+    def __init__(
+        self,
+        num_waypoints: int = 10,
+        bev_height: int = 400,
+        bev_width: int = 400,
+        grid_resolution: float = 0.25,
+        lora_r: int = 8,
+        use_polynomial_head: bool = True
+    ):
         super().__init__()
+        self.num_waypoints = num_waypoints
+        self.use_polynomial_head = use_polynomial_head
         
-        # 1. Pre-trained DINOv2 Small visual backbone with traditional LoRA
-        self.cam_backbone = DINOv2EncoderLoRA(model_name="dinov2_vits14", patch_size=14, lora_r=lora_r, lora_alpha=16)
+        print(f"[BEVPerceptionNetV2] Loading Pre-trained DINOv2 Small backbone (dinov2_vits14) + LoRA (r={lora_r})...")
+        self.cam_backbone = DINOv2EncoderLoRA(lora_r=lora_r, lora_alpha=16)
         
         # Channel reducer from 384 DINOv2 features to 64 BEV features
         self.channel_reducer = nn.Sequential(
@@ -180,7 +188,11 @@ class BEVPerceptionNetV2(nn.Module):
         
         self.temporal_mamba = TemporalMamba(dim=64, L_blocks=2)
         self.fusion_neck = BEVFusionNeckV2(cam_channels=64, lidar_channels=64, out_channels=128)
-        self.planning_head = BEVPlanningHead(in_channels=128, num_waypoints=num_waypoints)
+        
+        if use_polynomial_head:
+            self.planning_head = PolynomialBEVPlanningHead(in_channels=128, num_waypoints=num_waypoints)
+        else:
+            self.planning_head = BEVPlanningHead(in_channels=128, num_waypoints=num_waypoints)
 
     def forward(self, camera_imgs, lidar_bev, extrinsics, intrinsics, inference_params=None):
         """
@@ -192,15 +204,13 @@ class BEVPerceptionNetV2(nn.Module):
         """
         if len(camera_imgs.shape) == 6:
             B, S, N, C, H, W = camera_imgs.shape
-            # Fast SOTA Industrial Pipeline: Extract DINOv2 visual features per frame or on current frame
-            # Process N=8 cameras for current frame t=-1
             curr_camera_imgs = camera_imgs[:, -1, :, :, :, :]  # [B, N=8, 3, H, W]
         else:
             B, N, C, H, W = camera_imgs.shape
             S = 1
             curr_camera_imgs = camera_imgs
             
-        # 1. Extract 2D visual features on N=8 current cameras (only 8 images in DINOv2!)
+        # 1. Extract 2D visual features on N=8 current cameras
         x_flat = curr_camera_imgs.contiguous().view(B * N, C, H, W)
         cam_features_384 = self.cam_backbone(x_flat)  # [B*N=8, 384, H_grid, W_grid]
         cam_features_384 = torch.nan_to_num(cam_features_384, nan=0.0, posinf=1.0, neginf=-1.0)
@@ -235,8 +245,13 @@ class BEVPerceptionNetV2(nn.Module):
         lidar_features_bev = self.lidar_backbone(lidar_bev)
         fused_bev = self.fusion_neck(cam_features_bev, lidar_features_bev)
         
-        waypoints = self.planning_head(fused_bev)
-        return torch.nan_to_num(waypoints, nan=0.0, posinf=1.0, neginf=-1.0)
+        if self.use_polynomial_head:
+            waypoints, coeffs = self.planning_head(fused_bev)
+            waypoints = torch.nan_to_num(waypoints, nan=0.0, posinf=1.0, neginf=-1.0)
+            return waypoints, coeffs
+        else:
+            waypoints = self.planning_head(fused_bev)
+            return torch.nan_to_num(waypoints, nan=0.0, posinf=1.0, neginf=-1.0)
 
 
 def test_bev_perception_v2():
@@ -262,11 +277,14 @@ def test_bev_perception_v2():
 
     model.eval()
     with torch.no_grad():
-        wps = model(camera_imgs, lidar_bev, extrinsics, intrinsics)
-
-    print(f"Predicted Waypoints Output Shape: {wps.shape}")
+        out = model(camera_imgs, lidar_bev, extrinsics, intrinsics)
+    if isinstance(out, tuple):
+        wps, (cx, cy) = out
+    else:
+        wps = out
+        
     assert wps.shape == (B, 10, 4), f"Output shape mismatch! Expected {(B, 10, 4)}, got {wps.shape}"
-    print("✅ BEVPerceptionNetV2 forward pass test passed successfully!")
+    print("[OK] BEVPerceptionNetV2 forward pass test passed successfully!")
 
 
 if __name__ == "__main__":

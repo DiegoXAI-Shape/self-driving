@@ -1,0 +1,17 @@
+metric,value
+huber_loss,13.969064
+ade_m,5.3598
+fde_m,10.3810
+vel_error_mps,2.3600
+accel_error_mps2,7.1043
+yaw_error_deg,2888.9608
+horizon_ade_step_1_m,1.5210
+horizon_ade_step_2_m,2.3256
+horizon_ade_step_3_m,2.8471
+horizon_ade_step_4_m,3.9197
+horizon_ade_step_5_m,4.7168
+horizon_ade_step_6_m,5.2475
+horizon_ade_step_7_m,6.7823
+horizon_ade_step_8_m,7.1600
+horizon_ade_step_9_m,8.6966
+horizon_ade_step_10_m,10.3810
