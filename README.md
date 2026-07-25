@@ -10,8 +10,8 @@
 
 ## 1. Visión General del Proyecto
 
-* **Objetivo:** Exploración e implementación de una canalización de extremo a extremo (*End-to-End*) para la planificación de trayectorias en conducción autónoma. El sistema combina una arquitectura visual de extracción basada en **DINOv2 + LoRA**, recurrencia temporal espacio-temporal con **Temporal Mamba**, y fusión de sensores en vista de pájaro (**Camera IPM + LiDAR BEV**).
-* **Stack Tecnológico:** PyTorch, PEFT (LoRA), DINOv2, Mamba-SSM, CUDA, OpenCV, TensorBoard, CARLA Simulator API.
+* **Objetivo:** Exploración e implementación de una canalización de extremo a extremo (*End-to-End*) para la planificación de trayectorias en conducción autónoma. El sistema combina una arquitectura visual de extracción basada en **DINOv2 + LoRA**, recurrencia temporal espacio-temporal con **Temporal Mamba**, parametrización polinomial cinemática de 5to grado y fusión de sensores en vista de pájaro (**Camera IPM + LiDAR BEV**).
+* **Estado Actual:** **Fase Experimental en Proceso — Identificación de Fallas Estructurales en Bucle Cerrado.** A pesar de lograr métricas *Open-Loop* sub-métricas ($0.49\text{m}$ ADE), la evaluación en bucle cerrado reveló limitaciones estructurales críticas que requieren rediseño arquitectónico.
 
 ---
 
@@ -29,56 +29,50 @@ graph LR
     D --> E["Plano BEV Cámara [B, S, 64, H_bev, W_bev]"]
     E --> F["Temporal Mamba (SSM 1D)"]
     F --> G["Fusión con LiDAR BEV [B, 128, H_bev, W_bev]"]
-    G --> H["BEV Planning Head"]
-    H --> I["10 Waypoints Futuros [B, 10, 4]"]
+    G --> H["Polynomial BEV Planning Head"]
+    H --> I["Quintic Coefficients & Waypoints [B, 10, 4]"]
 ```
-
-#### Descripción por Bloques:
-1. **DINOv2 Visual Backbone + LoRA:** Extrae características ricas de textura, profundidad e invariancia espacial de las 8 vistas periféricas usando Meta DINOv2 Small (`dinov2_vits14`) pre-entrenado. Se inyectan matrices de bajo rango **LoRA ($r=8, \alpha=16$)** en las proyecciones de atención `qkv`, congelando el 93%+ del modelo base.
-2. **Geometría BEV via IPM:** Proyecta las características 2D a un espacio tridimensional de vista de pájaro ($400 \times 400$ a resolución de $0.25\text{m/pixel}$) guiado por las matrices extrínsecas $E$ e intrínsecas $K$ de cada cámara.
-3. **Temporal Mamba:** Recorre secuencialmente la dimensión temporal $S$ píxel a píxel sobre la grilla BEV para estimar velocidad, aceleración y dirección de movimiento.
-4. **GroupNorm Fusion Neck & Planning Head:** Concatena las características BEV de cámara y el tensor estadístico de LiDAR ($Z_{\max}, Z_{\text{diff}}, Z_{\text{mean}}$, densidad e intensidad) aplicando `GroupNorm(16)` para máxima estabilidad matemática a batch size $B=1$. Regresa los 10 waypoints futuros en coordenadas relativas del vehículo (`rel_x`, `rel_y`, `rel_z`, `rel_yaw`).
 
 ---
 
 ## 3. Tabla Comparativa de Experimentos
 
-| Métrica de Validación | Experimento 1 (Scratch Vision Mamba) | **Experimento 2 (DINOv2 + LoRA)** | **Mejora Obtenida** |
-| :--- | :---: | :---: | :---: |
-| **Backbone Visual** | Vision Mamba 2D (Entrenado desde cero) | **Meta DINOv2 Small + LoRA ($r=8$)** | Representación espacial pre-entrenada |
-| **Normalización** | `BatchNorm2d` (Inestable a $B=1$) | **`GroupNorm(num_groups=16)`** | Estabilidad matemática estricta |
-| **Mean ADE (Error Medio)** | $8.42\text{ metros}$ ❌ | **$0.49\text{ metros}$** ✅ | **¡17.1x de mejora! (49 cm)** |
-| **Mean FDE (Error a 5.0s)** | $15.80\text{ metros}$ ❌ | **$0.87\text{ metros}$** ✅ | **¡18.1x de mejora! (87 cm)** |
-| **Validation Loss** | $> 100.0$ (Sin convergencia) | **$42.68$** | **Reducción de $>60\%$** |
-| **Parámetros Entrenables** | $23.7\text{M}$ ($100\%$) | **$1.64\text{M}$ ($6.94\%$)** | **Reducción masiva de parámetros** |
-| **Comportamiento en Ruta** | Divergencia fuera de la carretera | **Mantenimiento sub-métrico de carril** | Transición a precisión industrial |
+| Métrica de Validación | Experimento 1 (Scratch Mamba) | Experimento 2 (DINOv2 + LoRA) | **Experimento 3 (Polinomial + Smoothness)** | **Evaluación Técnica** |
+| :--- | :---: | :---: | :---: | :---: |
+| **Backbone Visual** | Vision Mamba 2D (Desde cero) | Meta DINOv2 Small + LoRA ($r=8$) | Meta DINOv2 Small + LoRA ($r=8$) | Extrae características espaciales sólidas |
+| **Cabeza de Planificación** | Regresión Lineal | Regresión Lineal | Polinomio de 5to Grado + Tangente | Suavizado cinemático continuo |
+| **Mean ADE (Error Open-Loop)** | $8.42\text{m}$ ❌ | $0.49\text{m}$ ✅ | **$0.49\text{m}$** ✅ | **Precisión sub-métrica en dataset estático** |
+| **Mean FDE (Error a 5.0s)** | $15.80\text{m}$ ❌ | $0.87\text{m}$ | **$0.86\text{m}$** ✅ | Error contenido a largo plazo |
+| **Validation Loss** | $> 100.0$ | $42.68$ | **$43.05$** | Domina error $Yaw$ en grados sexagesimales |
+| **Conducción Bucle Cerrado (CARLA)** | ❌ Divergencia Inmediata | ❌ Colisiones en Intersecciones | ❌ **No Exitoso (Fallas Estructurales)** | **Incapacidad de navegación autónoma completa** |
 
 ---
 
-## 4. Análisis Post-Mortem y Diagnóstico Técnico
+## 4. Diagnóstico Post-Mortem: Por qué NO fue un Éxito en Bucle Cerrado (Fallas Estructurales)
 
-### Evidencia Comparativa Visual
+A pesar de que el entrenamiento offline arrojó métricas prometedoras ($0.49\text{m}$ ADE), la prueba viva en tiempo real dentro de CARLA demostró que **el modelo actual no es capaz de conducir de forma autónoma confiable** debido a cuatro fallas arquitectónicas fundamentales:
 
-| Experimento 1: Scratch Vision Mamba (ADE: 8.42m) | Experimento 2: DINOv2 + LoRA (ADE: 0.49m) |
-| :---: | :---: |
-| ![Experimento 1](./docs/assets/eval_sample_failed.png) | ![Experimento 2](./docs/assets/eval_sample_exp2.png) |
+### 1. Ausencia de Condicionamiento por Comando (Command Conditioning)
+El modelo recibe únicamente imágenes y LiDAR, pero **carece de una entrada de intención navegacional (GPS Target / High-Level Command)**. En intersecciones de 4 vías, la visión por sí sola es ambigua (ir recto, girar a la izquierda o derecha son opciones igualmente válidas). Al no tener una señal de comando que guíe la ruta, la red neuronal promedia las trayectorias de su entrenamiento, provocando que el vehículo dude o entre en bucles infinitos en medio de los cruces.
 
-### Lecciones del Experimento 1 (Scratch Vision Mamba)
-* **Cold-Start Visual:** Entrenar Vision Mamba desde cero con pocos datos ($\sim 2,300$ muestras) impidió que el encoder aprendiera primitivas visuales de profundidad y bordes, generando un error masivo de $8.42\text{m}$.
-* **Inestabilidad de `BatchNorm2d`:** Con batch size $B=1$, las estadísticas móviles derivaron salvajemente provocando oscilaciones en diente de sierra.
+### 2. Desacoplamiento entre Cuerda de Desplazamiento y Tangente de Orientación (Yaw Error)
+En giros de $90^\circ$, la línea recta de desplazamiento desde el origen $(0,0)$ hasta la esquina forma una diagonal de $45^\circ$ (la cuerda del arco). Calcular la orientación ($Yaw$) basándose únicamente en el vector de desplazamiento del polinomio hace que el vehículo apunte en diagonal ($45^\circ$) en lugar de rotar completamente el morro a los $90^\circ$ requeridos para seguir el nuevo carril.
 
-### Lecciones del Experimento 2 (DINOv2 + LoRA + GroupNorm)
-* **Éxito en Espacialidad Sub-Métrica ($0.49\text{m}$ ADE):** La integración de DINOv2 pre-entrenado resolvió instantáneamente la comprensión espacial de la carretera, logrando que el vehículo se mantenga en el carril a menos de medio metro de error.
-* **Fenómeno de Repetición Temporal:** Al proyectar el fotograma actual sobre la secuencia Mamba, la red aprendió a la perfección las trayectorias rectas ($0.49\text{m}$ ADE), pero mostró inercia en giros de $90^\circ$ al faltar señal de movimiento óptico entre fotogramas pasados.
-* **Sesgo de Escala en Yaw:** La función `HuberLoss` priorizó los errores de posición en metros (`X, Y`) sobre la orientación (`Yaw = 52.8°`), sugiriendo la necesidad de una cabeza trigonométrica ponderada `(sin(θ), cos(θ))`.
+### 3. Desequilibrio de Escala en la Función de Pérdida ($Yaw$ en Grados vs Metros)
+`CARLA API` entrega el ángulo `rotation.yaw` en grados sexagesimales ($0^\circ \dots 90^\circ$), mientras que las posiciones $X, Y, Z$ están en metros. `HuberLoss` suma directamente ambas magnitudes. Un error de $8^\circ$ por waypoint genera $\sim 40.0$ puntos de pérdida acumulada en la sumatoria de 10 waypoints, eclipsando la convergencia de posición ($0.49\text{m}$) e impidiendo que el loss baje de 40.
+
+### 4. Acumulación de Error Fuera de Distribución (Closed-Loop Drift)
+Al no haber sido entrenado con perturbaciones o aprendizaje por imitación condicional (*DAgger / Perturbation Noise Injection*), cualquier pequeño error de control desvía ligeramente al auto de la trayectoria ideal, colocándolo en estados visuales fuera de la distribución de entrenamiento que terminan en colisión contra la banqueta.
 
 ---
 
-## 5. Hoja de Ruta — Experimento No. 3
+## 5. Próximos Pasos y Futuras Features para el Rediseño Arquitectónico
 
-1. **Entrada Temporal Verdadera en Espacio BEV:** Extraer características visuales de los fotogramas pasados reales y entregárselas a `TemporalMamba` para que calcule velocidad real y detección de giros en intersecciones.
-2. **Cabeza de Orientación Trigonométrica:** Regresar el ángulo de guiñada mediante pares trigonométricos `(sin(θ), cos(θ))` acotados.
-3. **Pérdida Ponderada Multitarea:** Aplicar pesos diferenciados `L_total = L_pos + 0.1 * L_yaw` para equilibrar la precisión de posición y rotación.
+1. **Integración de Encoders de Comando (Command Conditioning):** Incorporar vectores one-hot de comando navegacional (`LANE_FOLLOW`, `TURN_LEFT`, `TURN_RIGHT`, `STRAIGHT`) o coordenadas objetivo GPS en la fusión del cuello BEV.
+2. **Normalización Trigonométrica y Pérdida Ponderada para Yaw:** 
+   * Representar la orientación mediante pares trigonométricos `(sin(θ), cos(θ))` acotados $[-1.0, +1.0]$ o radianes.
+   * Aplicar ponderación multitarea ($\mathcal{L}_{\text{total}} = \mathcal{L}_{\text{pos}} + 0.05 \cdot \mathcal{L}_{\text{yaw}}$) para equilibrar la contribución del loss entre metros y ángulos.
+3. **Inyección de Ruido de Perturbación en Datos:** Entrenar con desviaciones sintéticas para enseñar a la red a recuperarse de deriva lateral (*Lane Recovery*).
 
 ---
 
@@ -87,23 +81,24 @@ graph LR
 ```text
 Helioskrill_vim_train/
 ├── experiments/
-│   └── Experiment1_Mamba/        # Respaldo y registros del Experimento 1 (Baseline)
+│   ├── Experiment1_Mamba/        # Respaldo y registros del Experimento 1 (Baseline)
+│   └── Experiment2_DINOv2/       # Respaldo y registros del Experimento 2
 ├── models/
 │   ├── dataset.py                # Clase CARLADataset, métricas acotadas y EarlyStopping
 │   ├── modules/
 │   │   ├── BEV_perception_v2.py  # Red principal DINOv2 + GroupNorm + Temporal Mamba
-│   │   ├── BEV_planning.py       # Cabeza de regresión de waypoints
+│   │   ├── BEV_planning.py       # Cabeza Polinomial de 5to grado y Pérdida L_smooth
 │   │   └── BEV_sensors.py        # Filtro de Kalman Extendido (EKF telemetry)
 │   └── utils/
 │       ├── DINOv2_blocks.py      # Encoder DINOv2 Small con adaptador LoRA (r=8)
 │       ├── vim_blocks.py         # MambaBlock y TemporalMamba
 │       └── carla_data_collector.py # Recolector de datos multi-sensor en CARLA
 ├── scripts/
-│   ├── train_dinov2.py           # Pipeline de entrenamiento Experimento 2 (FP32 + Prefetch)
-│   ├── evaluate_visualization.py # Script de evaluación cruzada y gráficos BEV
+│   ├── train_exp3.py             # Pipeline de entrenamiento Experimento 3 (Polinomial + Smoothness)
+│   ├── evaluate_visualization.py # Script de evaluación cruzada y gráficos BEV top-down
+│   ├── run_carla_closed_loop.py  # Motor de inferencia en tiempo real en CARLA Simulator
 │   └── preprocess_dataset.py     # Pre-procesador paralelo de imágenes
-├── eval_results_exp2/            # Resultados y gráficos del Experimento 2
-├── reproducibility_exp2.md       # Guía de reproducibilidad técnica del Experimento 2
+├── reproducibility_exp3.md       # Guía de reproducibilidad técnica del Experimento 3
 ├── .gitignore                     # Filtros de datos, checkpoints y logs
 └── README.md                      # Documentación principal del proyecto
 ```
@@ -113,9 +108,12 @@ Helioskrill_vim_train/
 ## 7. Comandos de Ejecución
 
 ```bash
-# 1. Entrenar el Experimento No. 2 (DINOv2 + LoRA)
-python3 scripts/train_dinov2.py --data_dir ./data/ --epochs 20 --batch_size 1 --seq_len 5 --stride 5 --accumulation_steps 8 --lora_r 8 --lr 1e-4
+# 1. Entrenar Experimento No. 3
+python3 scripts/train_exp3.py --data_dir ./data/ --epochs 20 --batch_size 1 --seq_len 5 --stride 5
 
-# 2. Generar visualizaciones y reporte de evaluación
-python3 scripts/evaluate_visualization.py --checkpoint checkpoints/experimento_2/best_model.pth --output_dir eval_results_exp2/
+# 2. Generar Visualizaciones BEV Top-Down
+python3 scripts/evaluate_visualization.py --checkpoint checkpoints/experimento_3/best_model.pth --episodes 12,13
+
+# 3. Inferencia Autónoma en Tiempo Real en CARLA Simulator
+python3 scripts/run_carla_closed_loop.py --host localhost --port 2000 --checkpoint checkpoints/experimento_2/best_model.pth
 ```
