@@ -351,7 +351,7 @@ if __name__ == "__main__":
     parser.add_argument("--resize_factor",  type=float, default=0.5, help="Image scaling factor")
     parser.add_argument("--num_samples",    type=int, default=10, help="Number of visual sample figures to generate")
     parser.add_argument("--episodes",       default=None, help="Comma-separated episode names or numbers (e.g., --episodes 14 or --episodes episode_0014)")
-    parser.add_argument("--output_dir",     default="./eval_results/", help="Directory to save evaluation outputs")
+    parser.add_argument("--output_dir",     default="./experiments/Random", help="Directory to save evaluation outputs")
 
     args = parser.parse_args()
     args.data_dir = os.path.abspath(args.data_dir)
