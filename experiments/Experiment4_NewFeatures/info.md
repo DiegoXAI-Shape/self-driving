@@ -35,6 +35,7 @@ graph TD
     G --> H["Adaptive Pool 100x100"]
     H --> I["Temporal Mamba SSM (LR: 3e-4)"]
     I --> J["Interpolación 400x400 & LiDAR Fusion Neck"]
+    D --> J
     
     J --> K["MultiHeadBEVPlanningHead"]
     F --> K
