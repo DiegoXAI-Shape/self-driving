@@ -1,10 +1,11 @@
 # Helioskrill: End-to-End Space-Temporal Trajectory Planning with Vision Mamba (ViM), DINOv2 & Multi-Head Fusion
 
-[![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-ee4c2c.svg)](https://pytorch.org/)
-[![Mamba-SSM](https://img.shields.io/badge/Mamba--SSM-1.4+-black.svg)](https://github.com/state-spaces/mamba)
-[![DINOv2](https://img.shields.io/badge/DINOv2-Meta--AI-blue.svg)](https://github.com/facebookresearch/dinov2)
-[![CARLA](https://img.shields.io/badge/CARLA-0.9.15-blue.svg)](https://carla.org/)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Antigravity AI](https://img.shields.io/badge/Co--Developed%20with-Antigravity%20AI-4285F4?style=for-the-badge&logo=google&logoColor=white)](https://deepmind.google/)
+[![Gemini](https://img.shields.io/badge/Powered%20by-Gemini-8E7CC3?style=for-the-badge&logo=google-gemini&logoColor=white)](https://deepmind.google/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-ee4c2c.svg?style=for-the-badge&logo=pytorch&logoColor=white)](https://pytorch.org/)
+[![Mamba-SSM](https://img.shields.io/badge/Mamba--SSM-1.4+-black.svg?style=for-the-badge)](https://github.com/state-spaces/mamba)
+[![DINOv2](https://img.shields.io/badge/DINOv2-Meta--AI-blue.svg?style=for-the-badge&logo=meta&logoColor=white)](https://github.com/facebookresearch/dinov2)
+[![CARLA](https://img.shields.io/badge/CARLA-0.9.15-blue.svg?style=for-the-badge)](https://carla.org/)
 
 ---
 
@@ -218,3 +219,12 @@ python3 scripts/run_carla_closed_loop.py \
     --lookahead 6.0 \
     --max_speed 8.33
 ```
+
+---
+
+## 10. Desarrollo Colaborativo IA + Humano (AI-Native Pair Programming)
+
+Este proyecto de investigación está siendo co-desarrollado activamente en un esquema de **Pair Programming Agéntico de Inteligencia Artificial**:
+
+* **Dirección de Investigación y Supervisión Humana:** Formulación de hipótesis de arquitectura, recolección de datos en CARLA, definición de experimentos, auditoría de fallas en bucle cerrado y dirección estratégica del proyecto.
+* **Asistente IA Agéntico (Antigravity de Google DeepMind / Gemini):** Implementación de código en PyTorch, derivación de funciones de pérdida cinemáticas y trigonométricas, refactorización de pipelines, diagnóstico visual PCA, y diseño de la suite de evaluación.
