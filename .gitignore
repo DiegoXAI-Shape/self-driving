@@ -54,7 +54,10 @@ eval_results/visualizations/
 *.jpeg
 
 # Permite guardar capturas de muestra para la documentación
-!docs/assets/*.png
+!docs/*.png
+!docs/*.jpg
+!docs/**/*.png
+!docs/**/*.jpg
 
 # --- IDEs y Sistema Operativo ---
 .vscode/
