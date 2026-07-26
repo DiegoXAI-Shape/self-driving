@@ -116,7 +116,8 @@ class PurePursuitLateralController:
         alpha = math.atan2(target_lat, target_fwd)
         steer_angle = math.atan2(2.0 * self.wheel_base * math.sin(alpha), ld)
         
-        raw_steer = np.clip(steer_angle / 0.61, -1.0, 1.0)
+        # In dataset frame, +Y is Left. In CARLA VehicleControl, negative steer is Left.
+        raw_steer = np.clip(-steer_angle / 0.61, -1.0, 1.0)
         smooth_steer = 0.70 * self.last_steer + 0.30 * raw_steer
         self.last_steer = smooth_steer
         return float(smooth_steer)
@@ -140,6 +141,12 @@ class CarlaClosedLoopRunner:
         self.lidar_raw_points = None
         self.actor_list = []
         
+        # Recovery Controller State (Stuck / Escape Routine)
+        self.stuck_start_time = 0.0
+        self.recovery_active = False
+        self.recovery_start_time = 0.0
+        self.recovery_steer_dir = -1.0
+        
         # FIFO Buffer S=5
         self.fifo_cams = collections.deque(maxlen=5)
         self.fifo_lidar = collections.deque(maxlen=5)
@@ -152,20 +159,16 @@ class CarlaClosedLoopRunner:
         checkpoint = torch.load(checkpoint_path, map_location=self.device)
         state_dict = checkpoint["model_state"] if (isinstance(checkpoint, dict) and "model_state" in checkpoint) else checkpoint
         
-        fc_keys = [k for k in state_dict.keys() if "planning_head.fc" in k and "weight" in k]
+        poly_keys = [k for k in state_dict.keys() if "planning_head.poly_head" in k or "planning_head.fc" in k]
         use_poly = False
-        if fc_keys:
-            last_key = fc_keys[-1]
-            out_dim = state_dict[last_key].shape[0]
-            if out_dim == 22:
-                use_poly = True
-                
-        print(f"[Model] Initializing BEVPerceptionNetV2 ({'Quintic Polynomial' if use_poly else 'Linear 40-Waypoint'})")
+        if poly_keys:
+            use_poly = True
+            
+        print(f"[Model] Initializing BEVPerceptionNetV2 ({'Multi-Head / Quintic Polynomial' if use_poly else 'Linear 40-Waypoint'})")
         model = BEVPerceptionNetV2(
             num_waypoints=10,
             bev_height=400,
             bev_width=400,
-            grid_resolution=0.25,
             use_polynomial_head=use_poly
         ).to(self.device)
         
@@ -353,12 +356,24 @@ class CarlaClosedLoopRunner:
                 vel = vehicle.get_velocity()
                 speed_mps = math.sqrt(vel.x**2 + vel.y**2 + vel.z**2)
                 
+                # Process Navigation Command input
+                command_val = getattr(self.args, "command", 1)
+                command_tensor = torch.tensor([command_val], dtype=torch.long, device=self.device)
+                
                 with torch.no_grad():
-                    pred_out = self.model(cam_tensor, lidar_bev, extrinsics, intrinsics)
-                    if isinstance(pred_out, tuple):
+                    pred_out = self.model(cam_tensor, lidar_bev, extrinsics, intrinsics, command=command_tensor)
+                    if isinstance(pred_out, dict):
+                        pred_wps = pred_out["pred_waypoints"]
+                        model_speed = pred_out["pred_speed"].item()
+                        model_pedals = pred_out["pred_pedals"][0].cpu().numpy()
+                    elif isinstance(pred_out, tuple):
                         pred_wps = pred_out[0]
+                        model_speed = None
+                        model_pedals = None
                     else:
                         pred_wps = pred_out
+                        model_speed = None
+                        model_pedals = None
                         
                 wps = pred_wps[0].cpu().numpy()  # [10, 4]
                 
@@ -371,23 +386,78 @@ class CarlaClosedLoopRunner:
                 )
                 spectator.set_transform(spectator_offset)
                 
+                # LiDAR Emergency Safety Shield Check:
+                # Detects dense obstacle/wall within front bumper corridor (0.5m < X < 3.5m, |Y| < 1.0m)
+                emergency_brake = False
+                if self.lidar_raw_points is not None and len(self.lidar_raw_points) > 0:
+                    pts = self.lidar_raw_points
+                    front_mask = (pts[:, 0] > 0.5) & (pts[:, 0] < 3.5) & (np.abs(pts[:, 1]) < 1.0) & (pts[:, 2] > -0.5) & (pts[:, 2] < 1.5)
+                    if np.sum(front_mask) > 10:  # Dense wall/vehicle obstacle
+                        emergency_brake = True
+
                 # Compute Pure Pursuit Controls
                 steer_cmd = self.lat_controller.run_step(wps)
                 
-                target_dist_5 = math.hypot(wps[4, 0], wps[4, 1])
-                target_speed = min(self.args.max_speed, max(3.0, target_dist_5 / 1.0))
+                if model_speed is not None:
+                    target_speed = min(self.args.max_speed, max(0.0, model_speed))
+                else:
+                    target_dist_5 = math.hypot(wps[4, 0], wps[4, 1])
+                    target_speed = min(self.args.max_speed, max(0.0, target_dist_5 / 1.0))
+                    
                 control_output = self.lon_controller.run_step(target_speed, speed_mps)
                 
-                if speed_mps < 1.0:
-                    throttle_cmd = 0.40
-                    brake_cmd = 0.0
-                elif speed_mps > target_speed:
+                if emergency_brake:
                     throttle_cmd = 0.0
-                    brake_cmd = float(np.clip((speed_mps - target_speed) * 0.35, 0.1, 0.8))
+                    brake_cmd = 1.0
+                    status_text = " [SHIELD ALERT: Emergency Brake <3.5m!]"
+                elif model_pedals is not None:
+                    model_throttle, model_brake = model_pedals[0], model_pedals[1]
+                    if model_brake > 0.3 or speed_mps > target_speed:
+                        throttle_cmd = 0.0
+                        brake_cmd = float(np.clip(max(model_brake, (speed_mps - target_speed) * 0.35), 0.1, 0.8))
+                    else:
+                        throttle_cmd = float(np.clip(control_output, 0.0, 0.45))
+                        brake_cmd = 0.0
+                    status_text = ""
                 else:
-                    throttle_cmd = float(np.clip(control_output, 0.0, 0.45))
-                    brake_cmd = 0.0
+                    if speed_mps > target_speed:
+                        throttle_cmd = 0.0
+                        brake_cmd = float(np.clip((speed_mps - target_speed) * 0.35, 0.1, 0.8))
+                    else:
+                        throttle_cmd = float(np.clip(control_output, 0.0, 0.45))
+                        brake_cmd = 0.0
+                    status_text = ""
                 
+                # Recovery Controller (Stuck Escape Routine):
+                # Detects if throttle > 0.05 but vehicle is stuck (<0.3 m/s) for > 2.0s
+                current_time = time.time()
+                if not self.recovery_active:
+                    if throttle_cmd > 0.05 and speed_mps < 0.3:
+                        if self.stuck_start_time == 0.0:
+                            self.stuck_start_time = current_time
+                        elif (current_time - self.stuck_start_time) > 2.0:
+                            self.recovery_active = True
+                            self.recovery_start_time = current_time
+                            self.recovery_steer_dir = -1.0 if steer_cmd >= 0 else 1.0
+                    else:
+                        self.stuck_start_time = 0.0
+                else:
+                    remaining_sec = 2.5 - (current_time - self.recovery_start_time)
+                    if remaining_sec > 0:
+                        reverse_control = carla.VehicleControl(
+                            throttle=0.35,
+                            steer=float(self.recovery_steer_dir * 0.4),
+                            brake=0.0,
+                            reverse=True
+                        )
+                        vehicle.apply_control(reverse_control)
+                        print(f"\r[RECOVERY MODE ACTIVE] Stuck detected! Reversing out ({remaining_sec:.1f}s remaining)...", end="")
+                        time.sleep(0.02)
+                        continue
+                    else:
+                        self.recovery_active = False
+                        self.stuck_start_time = 0.0
+
                 control = carla.VehicleControl(
                     throttle=float(throttle_cmd),
                     steer=float(steer_cmd),
@@ -395,7 +465,7 @@ class CarlaClosedLoopRunner:
                 )
                 vehicle.apply_control(control)
                 
-                print(f"\r[Driving LIVE] Speed: {speed_mps*3.6:5.1f} km/h | Steer: {steer_cmd:+5.2f} | Throttle: {throttle_cmd:4.2f} | Brake: {brake_cmd:4.2f}", end="")
+                print(f"\r[Driving LIVE] Speed: {speed_mps*3.6:5.1f} km/h | Steer: {steer_cmd:+5.2f} | Throttle: {throttle_cmd:4.2f} | Brake: {brake_cmd:4.2f}{status_text}", end="")
                 time.sleep(0.02)
                 
         finally:
@@ -412,10 +482,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Helioskrill Closed-Loop Autonomous Driving Engine")
     parser.add_argument("--host",        default="localhost", help="CARLA server IP address")
     parser.add_argument("--port",        type=int, default=2000, help="CARLA server TCP port")
-    parser.add_argument("--checkpoint",  default="./checkpoints/experimento_2/best_model.pth", help="Model checkpoint path")
+    parser.add_argument("--checkpoint",  default="./checkpoints/experimento_4/best_model.pth", help="Model checkpoint path")
     parser.add_argument("--max_speed",   type=float, default=8.33, help="Max speed cap (m/s) [8.33 m/s = 30 km/h]")
     parser.add_argument("--lookahead",   type=float, default=4.0, help="Pure pursuit lookahead distance (m)")
     parser.add_argument("--spawn_idx",   type=int, default=0, help="Spawn point index on continuous lane")
+    parser.add_argument("--command",     type=int, default=1, help="Navigation Command (1: LANE_FOLLOW, 2: TURN_LEFT, 3: TURN_RIGHT)")
     
     args = parser.parse_args()
     runner = CarlaClosedLoopRunner(args)
