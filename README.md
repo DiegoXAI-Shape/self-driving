@@ -29,6 +29,7 @@ graph TD
     G --> H["Adaptive Pool 100x100 (16x Speedup)"]
     H --> I["Temporal Mamba SSM (LR: 3e-4)"]
     I --> J["Interpolación 400x400 & LiDAR Fusion Neck"]
+    D --> J
     
     J --> K["MultiHeadBEVPlanningHead"]
     F --> K
@@ -84,18 +85,18 @@ CLI maestro para diagnósticos visuales con modos `--mode` (`bev`, `data`, `pca`
 ## 5. Visualizaciones y Resultados
 
 ### A. Evaluación Sub-Métrica en Panel de 8 Cámaras + BEV Top-Down
-![Experimento 4 - Panel Completo 8 Cámaras](docs/exp4_bev_composite.png)
+![Experimento 4 - Panel Completo 8 Cámaras](./docs/exp4_bev_composite.png)
 *Figura 1: Evaluación en el conjunto de validación. La trayectoria predicha por Helioskrill (Línea Roja) se superpone con precisión sub-métrica ($0.49\text{m}$ ADE, $3.6^\circ$ Yaw) sobre el Ground Truth real (Línea Verde).*
 
 ### B. Curvas de Aprendizaje de Validación
-![Training Curves Experimento 4](docs/training_curves.png)
+![Training Curves Experimento 4](./docs/training_curves.png)
 *Figura 2: Curvas de convergencia a lo largo de las 15 épocas. Muestra la caída drástica del Loss a $0.65$, ADE a $0.41\text{m}$ y Yaw Error a $1.23^\circ$.*
 
 ---
 
 ## 6. Auditoría Visual de DINOv2 (Mapa PCA) y la Necesidad de Segmentación Semántica
 
-![DINOv2 PCA Feature Map](docs/dinov2_feature_pca.png)
+![DINOv2 PCA Feature Map](./docs/dinov2_feature_pca.png)
 *Figura 3: Proyección PCA de las 384 dimensiones de DINOv2 a 3 canales RGB.*
 
 ### Hallazgos de la Auditoría Visual de DINOv2:
@@ -108,7 +109,43 @@ Para que DINOv2 se apoye más en los límites de la carretera y no dependa únic
 
 ---
 
-## 7. Estructura del Proyecto
+## 7. ⚠️ Estado Real del Proyecto, Limitaciones y Próximas Mejoras (Roadmap)
+
+### 📌 Diagnóstico Realista (Offline vs Bucle Cerrado CARLA)
+
+Aunque el modelo logra métricas de validaciónoffline (*Open-Loop*) extraordinarias (**$0.41\text{m}$ de ADE y $1.23^\circ$ de error de $Yaw$**), la inferencia en tiempo real dentro del simulador CARLA (*Closed-Loop*) aún presenta inestabilidades de conducción.
+
+#### 1. ¿Por qué sigue fallando en conducción viva en CARLA?
+* **Desviación Acumulada por Sesgo de Datos (*Cascading Covariate Shift*):** El dataset original ($8,397$ fotogramas) fue grabado con el auto $100\%$ centrado en el carril. Al no tener ejemplos de "recuperación cuando el auto se desvía $20\text{ cm}$", un pequeño error en el volante acumula desviaciones progresivas hasta salirse del carril o tocar la banqueta.
+* **Falta de Ejemplos de Frenado de Emergencia:** El $90.8\%$ de las muestras son de aceleración continua. Por ello, fue necesario integrar un **Escudo de Seguridad por LiDAR ($<3.5\text{m}$)** y un **Controlador de Reversa de Emergencia** para evitar colisiones frontales.
+* **Falta de Atención Específica de Carril en DINOv2:** DINOv2 entiende la escena global (árboles, edificios, asfalto), pero no tiene atenciones supervisadas específicamente sobre las líneas blancas del carril ni los bordes de la acera.
+
+---
+
+### 🚀 Próximas Mejoras Programadas (Roadmap / Experimento No. 5)
+
+Para resolver definitivamente la conducción en bucle cerrado y alcanzar autonomía total indestructible, añadiremos las siguientes innovaciones arquitectónicas:
+
+1. **Reemplazar IPM por Lift-Splat-Shoot (LSS) aprovechando DINOv2 Monocular Depth:**
+   * **Problema de IPM:** Asume un mundo $100\%$ plano ($Z=0$), lo que estira y distorsiona banquetas, muros y autos en franjas infinitas en la grilla BEV.
+   * **Solución LSS (Philion & Fidler):** Predecir distribuciones discretas de profundidad $D$ para cada píxel. Dado que DINOv2 es el estado del arte en estimación de profundidad monocular (*Zero-Shot Depth*), proyectaremos parches 3D mediante LSS, logrando grillas BEV sin distorsión geométrica.
+
+2. **Fusión Multi-Cámara 360° con Atención Cruzada (Multi-View Cross-Attention):**
+   * Actualmente las 8 cámaras se procesan de forma aislada.
+   * Añadir un bloque de **Multi-View Cross-Attention** antes de la proyección BEV permitirá que los tokens de la cámara frontal (`Cam 0`) "platiquen" y se alienen con las cámaras laterales (`Cam 5`, `Cam 6`), creando una representación panorámica $360^\circ$ coherente.
+
+3. **Aumento de Datos por Perturbación Lateral (*Camera Translation Augmentation* en `dataset.py`):**
+   Desplazar sintéticamente las imágenes $20\text{--}40\text{ cm}$ a la izquierda/derecha durante el entrenamiento y ajustar la trayectoria objetivo hacia el centro. Esto enseñará a la red la regla: *"Si estoy desviado a la derecha, debo girar a la izquierda para centrarme"*.
+
+4. **Supervisión Auxiliar por Segmentación Semántica (*Road & Lane Mask Head*):**
+   Incorporar una cabeza decodificadora ligera de segmentación semántica de carril (*Road / Lane / Curb*) supervisada por pérdida auxiliar. Esto forzará al adaptador LoRA de DINOv2 a activar sus mapas de atención específicamente sobre las líneas de tráfico y banquetas.
+
+5. **Colección de Datos por Recuperación (*DAgger en CARLA*):**
+   Grabar 2 episodios adicionales en CARLA provocando desvíos intencionales hacia la acera y grabando la maniobra experta de retorno al centro del carril.
+
+---
+
+## 8. Estructura del Proyecto
 
 ```text
 Helioskrill_vim_train/
@@ -147,7 +184,7 @@ Helioskrill_vim_train/
 
 ---
 
-## 8. Comandos de Ejecución
+## 9. Comandos de Ejecución
 
 ```bash
 # 1. Entrenar Experimento No. 4 (Multi-Head & Differential LR)
