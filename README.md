@@ -47,12 +47,12 @@ graph TD
 | :--- | :---: | :---: | :---: | :---: |
 | **Backbone Visual** | Vision Mamba 2D (Desde cero) | Meta DINOv2 Small + LoRA ($r=8$) | Meta DINOv2 Small + LoRA ($r=8$) | **Meta DINOv2 Small + LoRA ($r=8$) (LR: 5e-5)** |
 | **Cabeza de Planificación** | Regresión Lineal | Regresión Lineal | Polinomio de 5to Grado + Tangente | **Multi-Head (Polinomial + Trig Yaw + Pedales)** |
-| **Condicionamiento GPS** | ❌ Ninguno | ❌ Ninguno | ❌ Ninguno | **`CommandEncoder` (64D Embedding)** ✅ |
-| **Mean ADE (Error Posición)** | $8.42\text{m}$ ❌ | $0.49\text{m}$ | $0.49\text{m}$ | **$0.41\text{m}$** 🏆 (Récord Histórico) |
-| **Mean FDE (Error a 5.0s)** | $15.80\text{m}$ ❌ | $0.87\text{m}$ | $0.86\text{m}$ | **$0.84\text{m}$** 🏆 |
-| **Mean Yaw Error (Orientación)** | $> 60.0^\circ$ | $52.8^\circ$ | $34.4^\circ$ | **$1.23^\circ$** 🏆 (Reducción del 96%) |
-| **Validation Loss** | $> 100.0$ | $42.68$ | $43.05$ | **$0.6594$** 🏆 (Récord Sub-Unitario) |
-| **Conducción Bucle Cerrado** | ❌ Divergencia | ❌ Colisiones en Cruces | ❌ Fallas Estructurales | **⚠️ Con Escudo LiDAR + Rutina de Reversa** |
+| **Condicionamiento GPS** | Ninguno | Ninguno | Ninguno | **`CommandEncoder` (64D Embedding)** |
+| **Mean ADE (Error Posición)** | $8.42\text{m}$ | $0.49\text{m}$ | $0.49\text{m}$ | **$0.41\text{m}$** (Récord Histórico) |
+| **Mean FDE (Error a 5.0s)** | $15.80\text{m}$ | $0.87\text{m}$ | $0.86\text{m}$ | **$0.84\text{m}$** |
+| **Mean Yaw Error (Orientación)** | $> 60.0^\circ$ | $52.8^\circ$ | $34.4^\circ$ | **$1.23^\circ$** (Reducción del 96%) |
+| **Validation Loss** | $> 100.0$ | $42.68$ | $43.05$ | **$0.6594$** (Récord Sub-Unitario) |
+| **Conducción Bucle Cerrado** | Divergencia | Colisiones en Cruces | Fallas Estructurales | **Con Escudo LiDAR + Rutina de Reversa** |
 
 ---
 
@@ -85,35 +85,38 @@ CLI maestro para diagnósticos visuales con modos `--mode` (`bev`, `data`, `pca`
 ## 5. Visualizaciones y Resultados
 
 ### A. Evaluación Sub-Métrica en Panel de 8 Cámaras + BEV Top-Down
-![Experimento 4 - Panel Completo 8 Cámaras](./docs/exp4_bev_composite.png)
-*Figura 1: Evaluación en el conjunto de validación. La trayectoria predicha por Helioskrill (Línea Roja) se superpone con precisión sub-métrica ($0.49\text{m}$ ADE, $3.6^\circ$ Yaw) sobre el Ground Truth real (Línea Verde).*
+<img src="docs/exp4_bev_composite.png" width="100%" alt="Experimento 4 - Panel Completo 8 Cámaras" />
+
+*Figura 1: Evaluación en el conjunto de validación. La trayectoria predicha por Helioskrill (Línea Roja) se superpone con precisión sub-métrica sobre el Ground Truth real (Línea Verde).*
 
 ### B. Curvas de Aprendizaje de Validación
-![Training Curves Experimento 4](./docs/training_curves.png)
+<img src="docs/training_curves.png" width="100%" alt="Training Curves Experimento 4" />
+
 *Figura 2: Curvas de convergencia a lo largo de las 15 épocas. Muestra la caída drástica del Loss a $0.65$, ADE a $0.41\text{m}$ y Yaw Error a $1.23^\circ$.*
 
 ---
 
 ## 6. Auditoría Visual de DINOv2 (Mapa PCA) y la Necesidad de Segmentación Semántica
 
-![DINOv2 PCA Feature Map](./docs/dinov2_feature_pca.png)
+<img src="docs/dinov2_feature_pca.png" width="100%" alt="DINOv2 PCA Feature Map" />
+
 *Figura 3: Proyección PCA de las 384 dimensiones de DINOv2 a 3 canales RGB.*
 
 ### Hallazgos de la Auditoría Visual de DINOv2:
 1. **Extracción de Características Generales:** DINOv2 (al ser pre-entrenado en millones de imágenes web) logra distinguir carreteras, vegetación y edificios en bloques de color diferenciados.
 2. **Falta de Supervisión Específica de Carril:** Al ser un modelo auto-supervisado general sin supervisión de conducción, DINOv2 carece de atenciones enfocadas estrictamente en los bordes de la banqueta y líneas pintadas en el asfalto.
 
-### 💡 Diagnóstico y Recomendación Futura:
+### Diagnóstico y Recomendación Futura:
 Para que DINOv2 se apoye más en los límites de la carretera y no dependa únicamente del LiDAR:
 * **Tarea Auxiliar de Segmentación Semántica:** Agregar una cabeza decodificadora ligera de segmentación semántica (*Road / Lane / Curb Masking*) supervisada durante el entrenamiento. Esto forzará al adaptador LoRA de DINOv2 a anclar sus mapas de atención específicamente en las líneas del carril y banquetas.
 
 ---
 
-## 7. ⚠️ Estado Real del Proyecto, Limitaciones y Próximas Mejoras (Roadmap)
+## 7. Estado Real del Proyecto, Limitaciones y Próximas Mejoras (Roadmap)
 
-### 📌 Diagnóstico Realista (Offline vs Bucle Cerrado CARLA)
+### Diagnóstico Realista (Offline vs Bucle Cerrado CARLA)
 
-Aunque el modelo logra métricas de validaciónoffline (*Open-Loop*) extraordinarias (**$0.41\text{m}$ de ADE y $1.23^\circ$ de error de $Yaw$**), la inferencia en tiempo real dentro del simulador CARLA (*Closed-Loop*) aún presenta inestabilidades de conducción.
+Aunque el modelo logra métricas de validación offline (*Open-Loop*) extraordinarias (**$0.41\text{m}$ de ADE y $1.23^\circ$ de error de $Yaw$**), la inferencia en tiempo real dentro del simulador CARLA (*Closed-Loop*) aún presenta inestabilidades de conducción.
 
 #### 1. ¿Por qué sigue fallando en conducción viva en CARLA?
 * **Desviación Acumulada por Sesgo de Datos (*Cascading Covariate Shift*):** El dataset original ($8,397$ fotogramas) fue grabado con el auto $100\%$ centrado en el carril. Al no tener ejemplos de "recuperación cuando el auto se desvía $20\text{ cm}$", un pequeño error en el volante acumula desviaciones progresivas hasta salirse del carril o tocar la banqueta.
@@ -122,7 +125,7 @@ Aunque el modelo logra métricas de validaciónoffline (*Open-Loop*) extraordina
 
 ---
 
-### 🚀 Próximas Mejoras Programadas (Roadmap / Experimento No. 5)
+### Próximas Mejoras Programadas (Roadmap / Experimento No. 5)
 
 Para resolver definitivamente la conducción en bucle cerrado y alcanzar autonomía total indestructible, añadiremos las siguientes innovaciones arquitectónicas:
 
@@ -132,7 +135,7 @@ Para resolver definitivamente la conducción en bucle cerrado y alcanzar autonom
 
 2. **Fusión Multi-Cámara 360° con Atención Cruzada (Multi-View Cross-Attention):**
    * Actualmente las 8 cámaras se procesan de forma aislada.
-   * Añadir un bloque de **Multi-View Cross-Attention** antes de la proyección BEV permitirá que los tokens de la cámara frontal (`Cam 0`) "platiquen" y se alienen con las cámaras laterales (`Cam 5`, `Cam 6`), creando una representación panorámica $360^\circ$ coherente.
+   * Añadir un bloque de **Multi-View Cross-Attention** antes de la proyección BEV permitirá que los tokens de la cámara frontal (`Cam 0`) interactúen y se alienen con las cámaras laterales (`Cam 5`, `Cam 6`), creando una representación panorámica $360^\circ$ coherente.
 
 3. **Aumento de Datos por Perturbación Lateral (*Camera Translation Augmentation* en `dataset.py`):**
    Desplazar sintéticamente las imágenes $20\text{--}40\text{ cm}$ a la izquierda/derecha durante el entrenamiento y ajustar la trayectoria objetivo hacia el centro. Esto enseñará a la red la regla: *"Si estoy desviado a la derecha, debo girar a la izquierda para centrarme"*.
