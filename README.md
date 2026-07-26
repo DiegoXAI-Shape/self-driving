@@ -1,4 +1,4 @@
-# Helioskrill: End-to-End Space-Temporal Trajectory Planning with Vision Mamba (ViM), DINOv2 & Multi-Head Fusion
+# Helioskrill: Hybrid Space-Temporal Trajectory Planning with DINOv2, Temporal Mamba SSM & Multi-Head Control
 
 [![Antigravity AI](https://img.shields.io/badge/Co--Developed%20with-Antigravity%20AI-4285F4?style=for-the-badge&logo=google&logoColor=white)](https://deepmind.google/)
 [![Gemini](https://img.shields.io/badge/Powered%20by-Gemini-8E7CC3?style=for-the-badge&logo=google-gemini&logoColor=white)](https://deepmind.google/)
@@ -11,7 +11,7 @@
 
 ## 1. Visión General del Proyecto
 
-* **Objetivo:** Exploración e implementación de una canalización de extremo a extremo (*End-to-End*) para la planificación de trayectorias en conducción autónoma. El sistema combina una arquitectura visual de extracción basada en **DINOv2 + LoRA**, recurrencia temporal espacio-temporal con **Temporal Mamba (100x100 BEV Grid)**, condicionamiento por órdenes GPS (**CommandEncoder**), parametrización polinomial cinemática de 5to grado, representación trigonométrica de $Yaw$ $(\sin \theta, \cos \theta)$, y desacoplamiento multitarea (**Multi-Head Architecture**).
+* **Objetivo:** Exploración e implementación de una arquitectura híbrida para la planificación espacio-temporal de trayectorias en conducción autónoma. El sistema combina una extracción visual basada en **DINOv2 + LoRA**, recurrencia temporal secuencial con **Temporal Mamba SSM (100x100 BEV Grid)**, condicionamiento por órdenes GPS (**CommandEncoder**), parametrización polinomial cinemática de 5to grado, representación trigonométrica de $Yaw$ $(\sin \theta, \cos \theta)$, desacoplamiento multitarea (**Multi-Head Architecture**), y salvaguardas de control activo en bucle cerrado (Escudo LiDAR y Controlador de Reversa).
 * **Estado Actual:** **Experimento No. 4 Completado — Sub-Métrico y Balance de Clases.** Se logró la mejor métrica histórica de orientación ($1.23^\circ$ de error de $Yaw$) y pérdida de validación sub-unitaria ($0.65$), incorporando mecanismos de control activo en tiempo real (Escudo LiDAR y Controlador de Reversa).
 
 ---
