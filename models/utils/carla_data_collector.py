@@ -194,7 +194,7 @@ def open_csv_writers(paths: dict) -> dict:
     ctrl_path = os.path.join(paths["control"], "control.csv")
     ctrl_file = open(ctrl_path, "w", newline="", encoding="utf-8")
     ctrl_writer = csv.writer(ctrl_file)
-    ctrl_writer.writerow(["frame", "throttle", "brake", "steer", "hand_brake", "reverse"])
+    ctrl_writer.writerow(["frame", "throttle", "brake", "steer", "hand_brake", "reverse", "is_recovery"])
     writers["control"] = (ctrl_file, ctrl_writer)
 
     pred_path = os.path.join(paths["prediction"], "actors.csv")
@@ -230,19 +230,24 @@ def lidar_to_bev_grid_vectorized(point_cloud: np.ndarray, cfg: dict) -> np.ndarr
     row_idx = np.clip(((bev_range - x) / res).astype(np.int32), 0, grid_size - 1)
     col_idx = np.clip(((bev_range - y) / res).astype(np.int32), 0, grid_size - 1)
 
-    bev_grid = np.zeros((5, grid_size, grid_size), dtype=np.float32)
+    bev_grid = np.full((5, grid_size, grid_size), 0.0, dtype=np.float32)
 
     if len(z) == 0:
         return bev_grid
 
-    np.maximum.at(bev_grid[0], (row_idx, col_idx), z)
-    np.add.at(bev_grid[2], (row_idx, col_idx), z)
-    np.add.at(bev_grid[3], (row_idx, col_idx), 1.0)
-    np.maximum.at(bev_grid[4], (row_idx, col_idx), intensity)
+    # Temp arrays for Z_min tracking (initialized to infinity)
+    z_min_grid = np.full((grid_size, grid_size), 999.0, dtype=np.float32)
+
+    np.maximum.at(bev_grid[0], (row_idx, col_idx), z)          # Channel 0: Z_max
+    np.minimum.at(z_min_grid,  (row_idx, col_idx), z)          # Temp Z_min
+    np.add.at(bev_grid[2],     (row_idx, col_idx), z)          # Channel 2: Z_sum for Z_mean
+    np.add.at(bev_grid[3],     (row_idx, col_idx), 1.0)        # Channel 3: Point Count
+    np.maximum.at(bev_grid[4], (row_idx, col_idx), intensity)  # Channel 4: Max Intensity
 
     has_points = bev_grid[3] > 0
-    bev_grid[2] = np.where(has_points, bev_grid[2] / np.maximum(bev_grid[3], 1.0), 0.0)
-    bev_grid[3] = np.clip(bev_grid[3] / 64.0, 0.0, 1.0)
+    bev_grid[1] = np.where(has_points, bev_grid[0] - z_min_grid, 0.0)      # Channel 1: Z_diff
+    bev_grid[2] = np.where(has_points, bev_grid[2] / np.maximum(bev_grid[3], 1.0), 0.0) # Channel 2: Z_mean
+    bev_grid[3] = np.clip(bev_grid[3] / 64.0, 0.0, 1.0)                    # Channel 3: Normalized Density
 
     return bev_grid
 
@@ -581,7 +586,7 @@ def run_episode(client, world, episode_id: int, cfg: dict):
             ctrl = vehicle.get_control()
             ctrl_row = [
                 frame_id, round(ctrl.throttle, 6), round(ctrl.brake, 6), round(ctrl.steer, 6),
-                int(ctrl.hand_brake), int(ctrl.reverse)
+                int(ctrl.hand_brake), int(ctrl.reverse), 0
             ]
             writers["control"][1].writerow(ctrl_row)
 
