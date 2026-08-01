@@ -59,6 +59,10 @@ eval_results/visualizations/
 !docs/**/*.png
 !docs/**/*.jpg
 
+# --- Código Archivado y Temporal ---
+trash/
+scratch/
+
 # --- IDEs y Sistema Operativo ---
 .vscode/
 .idea/
