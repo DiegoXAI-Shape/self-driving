@@ -37,6 +37,8 @@ from models.utils.carla_data_collector import (
     get_future_waypoints,
     get_nearby_actors,
     spawn_cameras,
+    spawn_depth_cameras,
+    spawn_semantic_cameras,
     spawn_lidar,
     spawn_imu,
     spawn_gnss,
@@ -133,19 +135,25 @@ def run_dagger_episode(client, world, episode_id: int, cfg: dict, perturb_interv
     )
 
     cameras = spawn_cameras(world, vehicle, cfg)
-    lidar = spawn_lidar(world, vehicle, cfg)
+    depth_cameras = spawn_depth_cameras(world, vehicle, cfg)
+    semantic_cameras = spawn_semantic_cameras(world, vehicle, cfg)
+
     imu = spawn_imu(world, vehicle)
     gnss = spawn_gnss(world, vehicle)
 
     # Individual Sensor Queues matching main collector
     cam_queues = [queue.Queue() for _ in range(len(CAMERA_CONFIGS))]
-    lidar_queue = queue.Queue()
+    depth_queues = [queue.Queue() for _ in range(len(CAMERA_CONFIGS))]
+    semantic_queues = [queue.Queue() for _ in range(len(CAMERA_CONFIGS))]
+
     imu_queue = queue.Queue()
     gnss_queue = queue.Queue()
 
-    for i, cam in enumerate(cameras):
-        cam.listen(cam_queues[i].put)
-    lidar.listen(lidar_queue.put)
+    for i in range(len(CAMERA_CONFIGS)):
+        cameras[i].listen(cam_queues[i].put)
+        depth_cameras[i].listen(depth_queues[i].put)
+        semantic_cameras[i].listen(semantic_queues[i].put)
+
     imu.listen(imu_queue.put)
     gnss.listen(gnss_queue.put)
 
@@ -169,7 +177,8 @@ def run_dagger_episode(client, world, episode_id: int, cfg: dict, perturb_interv
             timeout = 2.0 / cfg["fps"]
             try:
                 cam_images = [q.get(timeout=timeout) for q in cam_queues]
-                lidar_data = lidar_queue.get(timeout=timeout)
+                depth_images = [q.get(timeout=timeout) for q in depth_queues]
+                semantic_images = [q.get(timeout=timeout) for q in semantic_queues]
                 imu_data = imu_queue.get(timeout=timeout)
                 gnss_data = gnss_queue.get(timeout=timeout)
             except queue.Empty:
@@ -204,20 +213,23 @@ def run_dagger_episode(client, world, episode_id: int, cfg: dict, perturb_interv
 
             frame_id = saved_frames
 
-            # Save 8 Multi-View RGB Camera frames
-            for i, img_data in enumerate(cam_images):
-                array = np.frombuffer(img_data.raw_data, dtype=np.uint8)
+            # Save 8 Multi-View RGB, Depth, and Semantic Camera frames
+            for i in range(len(CAMERA_CONFIGS)):
+                # RGB Frame
+                array = np.frombuffer(cam_images[i].raw_data, dtype=np.uint8)
                 array = array.reshape((cfg["cam_height"], cfg["cam_width"], 4))
                 bgr = array[:, :, :3]
-                filename = os.path.join(paths["cameras"][i], f"frame_{frame_id:06d}.png")
-                cv2.imwrite(filename, bgr)
+                cv2.imwrite(os.path.join(paths["cameras"][i], f"frame_{frame_id:06d}.png"), bgr)
 
-            # Save 5-Channel LiDAR BEV Tensor
-            pts_raw = np.frombuffer(lidar_data.raw_data, dtype=np.float32)
-            pts_raw = pts_raw.reshape(-1, 4)
-            bev_grid = lidar_to_bev_grid_vectorized(pts_raw, cfg)
-            lidar_filename = os.path.join(paths["lidar"], f"frame_{frame_id:06d}.npy")
-            np.save(lidar_filename, bev_grid)
+                # Depth Frame (CARLA 24-bit encoded depth in PNG format)
+                d_array = np.frombuffer(depth_images[i].raw_data, dtype=np.uint8)
+                d_array = d_array.reshape((cfg["cam_height"], cfg["cam_width"], 4))
+                cv2.imwrite(os.path.join(paths["depth"][i], f"frame_{frame_id:06d}.png"), d_array)
+
+                # Semantic Segmentation Frame (CARLA Semantic Tag in Red channel)
+                s_array = np.frombuffer(semantic_images[i].raw_data, dtype=np.uint8)
+                s_array = s_array.reshape((cfg["cam_height"], cfg["cam_width"], 4))
+                cv2.imwrite(os.path.join(paths["semantic"][i], f"frame_{frame_id:06d}.png"), s_array)
 
             # Telemetry logging (Real IMU + GNSS + Pose)
             ego_tf = vehicle.get_transform()
