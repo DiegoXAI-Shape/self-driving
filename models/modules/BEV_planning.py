@@ -84,10 +84,12 @@ class PolynomialBEVPlanningHead(nn.Module):
 
 class MultiHeadBEVPlanningHead(nn.Module):
     """
-    Industrial Multi-Head Planning Head for Experiment 4:
-    1. Quintic Polynomial Position Head (X(t), Y(t) coefficients + Z offsets)
+    Industrial Multi-Head Planning Head (UniAD / Waymo MTR Style):
+    1. Parallel Offset Trajectory Head (torch.cumsum on predicted step deltas [dx, dy, dz])
     2. Bounded Trigonometric Yaw Head (sin(yaw), cos(yaw)) on unit circle
     3. Pedal & Speed Head (target_speed_mps, throttle, brake)
+
+    Eliminates 5th-degree polynomial gradient explosion and Runge's phenomenon wiggles on S-curves.
     """
     def __init__(self, in_channels: int = 128, num_waypoints: int = 10, total_time: float = 2.5):
         super().__init__()
@@ -102,21 +104,18 @@ class MultiHeadBEVPlanningHead(nn.Module):
             nn.Dropout(0.1)
         )
         
-        self.poly_head = nn.Linear(256, 12 + num_waypoints)
+        # Parallel Offset Head: outputs 10 relative (dx, dy, dz) step vectors
+        self.offset_head = nn.Linear(256, num_waypoints * 3)
+        
+        # Trigonometric Yaw Head: outputs (sin(yaw), cos(yaw)) on unit circle
         self.yaw_trig_head = nn.Linear(256, num_waypoints * 2)
         
+        # Pedal & Speed Head: [speed_mps, throttle, brake]
         self.pedal_speed_head = nn.Sequential(
             nn.Linear(256, 64),
             nn.SiLU(inplace=True),
-            nn.Linear(64, 3) # [speed_mps, throttle, brake]
+            nn.Linear(64, 3)
         )
-        
-        t_vals = torch.linspace(total_time / num_waypoints, total_time, num_waypoints)
-        T = torch.stack([t_vals**k for k in range(6)], dim=1)
-        self.register_buffer("T", T)
-        
-        dT = torch.stack([(k + 1) * (t_vals**k) for k in range(5)], dim=1)
-        self.register_buffer("dT", dT)
 
     def forward(self, bev_features, command_embed):
         B = bev_features.shape[0]
@@ -126,19 +125,18 @@ class MultiHeadBEVPlanningHead(nn.Module):
         x = torch.cat([x, command_embed], dim=-1)
         feat = self.shared_fc(x)
         
-        coeffs_and_z = self.poly_head(feat)
-        coeffs_x = coeffs_and_z[:, 0:6]
-        coeffs_y = coeffs_and_z[:, 6:12]
-        z_vals = coeffs_and_z[:, 12:]
+        # 1. Parallel Offset prediction [B, num_waypoints, 3]
+        deltas = self.offset_head(feat).view(B, self.num_waypoints, 3)
         
-        pred_x = torch.matmul(coeffs_x, self.T.T)
-        pred_y = torch.matmul(coeffs_y, self.T.T)
+        # 2. Cumulative Sum (torch.cumsum) -> Absolute (X, Y, Z) positions [B, num_waypoints, 3]
+        pred_pos = torch.cumsum(deltas, dim=1)
         
+        # 3. Trigonometric Yaw prediction [B, num_waypoints, 2]
         raw_trig = self.yaw_trig_head(feat).view(B, self.num_waypoints, 2)
         norm_trig = F.normalize(raw_trig, p=2, dim=-1)
         pred_yaw = torch.atan2(norm_trig[..., 0], norm_trig[..., 1]) * (180.0 / torch.pi)
         
-        pred_wps = torch.stack([pred_x, pred_y, z_vals, pred_yaw], dim=-1)
+        pred_wps = torch.cat([pred_pos, pred_yaw.unsqueeze(-1)], dim=-1) # [B, num_waypoints, 4]
         
         pedal_speed_out = self.pedal_speed_head(feat)
         pred_speed = pedal_speed_out[:, 0]
@@ -146,7 +144,7 @@ class MultiHeadBEVPlanningHead(nn.Module):
         
         return {
             "pred_waypoints": pred_wps,
-            "coeffs": (coeffs_x, coeffs_y),
+            "deltas": deltas,
             "trig_yaw": norm_trig,
             "pred_speed": pred_speed,
             "pred_pedals": pred_pedals
@@ -155,7 +153,7 @@ class MultiHeadBEVPlanningHead(nn.Module):
 
 class MultiHeadPlanningLoss(nn.Module):
     """
-    Weighted Multitask Loss Function for Multi-Head Trajectory Planning.
+    Weighted Multitask Loss Function for Parallel Offset BEV Trajectory Planning.
     """
     def __init__(self, w_pos: float = 1.0, w_yaw: float = 0.5, w_speed: float = 0.1, w_pedal: float = 0.1, w_smooth: float = 0.01):
         super().__init__()
@@ -168,7 +166,7 @@ class MultiHeadPlanningLoss(nn.Module):
 
     def forward(self, outputs, target_wps, telemetry_target, sample_weights):
         pred_wps = outputs["pred_waypoints"]
-        coeffs_x, coeffs_y = outputs["coeffs"]
+        deltas = outputs["deltas"]
         trig_yaw = outputs["trig_yaw"]
         pred_speed = outputs["pred_speed"]
         pred_pedals = outputs["pred_pedals"]
@@ -186,9 +184,9 @@ class MultiHeadPlanningLoss(nn.Module):
         loss_speed_raw = self.huber(pred_speed, gt_speed)
         loss_pedal_raw = self.huber(pred_pedals, gt_pedals).mean(dim=-1)
         
-        a2, a3, a4, a5 = coeffs_x[:, 2], coeffs_x[:, 3], coeffs_x[:, 4], coeffs_x[:, 5]
-        b2, b3, b4, b5 = coeffs_y[:, 2], coeffs_y[:, 3], coeffs_y[:, 4], coeffs_y[:, 5]
-        loss_smooth_raw = (a2**2 + b2**2 + 0.5*(a3**2 + b3**2) + 0.1*(a4**2 + a5**2 + b4**2 + b5**2))
+        # Smoothness loss on step acceleration (differences between consecutive deltas)
+        accel_deltas = deltas[:, 1:] - deltas[:, :-1]
+        loss_smooth_raw = torch.mean(accel_deltas**2, dim=[1, 2])
         
         sample_loss = (
             self.w_pos * loss_pos_raw +
