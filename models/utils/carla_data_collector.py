@@ -96,7 +96,12 @@ CONFIG = {
     "lidar_upper_fov": 2.0,
     "lidar_lower_fov": -24.8,
 
-    "bev_range_m": 50.0,
+    "bev_height": 200,
+    "bev_width": 200,
+    "bev_x_min": -10.0,
+    "bev_x_max": 40.0,
+    "bev_y_min": -25.0,
+    "bev_y_max": 25.0,
     "bev_resolution": 0.25,
 
     "num_waypoints": 10,
@@ -142,7 +147,7 @@ def get_next_episode_id(output_root: str) -> int:
 
 def build_episode_dirs(output_root: str, episode_id: int) -> dict:
     """
-    Creates episode subdirectories for Perception, Location, Planning, Control, and Prediction.
+    Creates episode subdirectories for Perception (RGB, Depth, Semantic), Location, Planning, Control, and Prediction.
     """
     ep_str = f"episode_{episode_id:04d}"
     paths = {
@@ -150,16 +155,24 @@ def build_episode_dirs(output_root: str, episode_id: int) -> dict:
             os.path.join(output_root, "Perception", ep_str, "cameras", f"cam_{i}")
             for i in range(len(CAMERA_CONFIGS))
         ],
-        "lidar":      os.path.join(output_root, "Perception", ep_str, "lidar"),
+        "depth": [
+            os.path.join(output_root, "Perception", ep_str, "depth", f"cam_{i}")
+            for i in range(len(CAMERA_CONFIGS))
+        ],
+        "semantic": [
+            os.path.join(output_root, "Perception", ep_str, "semantic", f"cam_{i}")
+            for i in range(len(CAMERA_CONFIGS))
+        ],
+        "bev_semantic": os.path.join(output_root, "Perception", ep_str, "bev_semantic"),
         "location":   os.path.join(output_root, "Location",   ep_str),
         "planning":   os.path.join(output_root, "Planning",   ep_str),
         "control":    os.path.join(output_root, "Control",    ep_str),
         "prediction": os.path.join(output_root, "Prediction", ep_str),
     }
 
-    for cam_dir in paths["cameras"]:
+    for cam_dir in paths["cameras"] + paths["depth"] + paths["semantic"]:
         os.makedirs(cam_dir, exist_ok=True)
-    for key in ("lidar", "location", "planning", "control", "prediction"):
+    for key in ("bev_semantic", "location", "planning", "control", "prediction"):
         os.makedirs(paths[key], exist_ok=True)
 
     return paths
@@ -216,27 +229,33 @@ def close_csv_writers(writers: dict):
 
 def lidar_to_bev_grid_vectorized(point_cloud: np.ndarray, cfg: dict) -> np.ndarray:
     """
-    Vectorized LiDAR raw point cloud to 5-channel BEV Grid converter (Z_max, Z_diff, Z_mean, density, intensity).
+    Vectorized point cloud to 5-channel BEV Grid converter (Z_max, Z_diff, Z_mean, density, intensity).
+    Supports Tesla-style Asymmetric 200x200 BEV Grid (-10m to +40m X, -25m to +25m Y @ 0.25m/px).
     """
-    bev_range = cfg["bev_range_m"]
-    res = cfg["bev_resolution"]
-    grid_size = int(2 * bev_range / res)
+    bev_h = cfg.get("bev_height", 200)
+    bev_w = cfg.get("bev_width", 200)
+    res = cfg.get("bev_resolution", 0.25)
+
+    x_min = cfg.get("bev_x_min", -10.0)
+    x_max = cfg.get("bev_x_max", 40.0)
+    y_min = cfg.get("bev_y_min", -25.0)
+    y_max = cfg.get("bev_y_max", 25.0)
 
     x, y, z, intensity = point_cloud[:, 0], point_cloud[:, 1], point_cloud[:, 2], point_cloud[:, 3]
 
-    mask = (x > -bev_range) & (x < bev_range) & (y > -bev_range) & (y < bev_range) & (z > -3.0) & (z < 5.0)
+    mask = (x >= x_min) & (x <= x_max) & (y >= y_min) & (y <= y_max) & (z > -3.0) & (z < 5.0)
     x, y, z, intensity = x[mask], y[mask], z[mask], intensity[mask]
 
-    row_idx = np.clip(((bev_range - x) / res).astype(np.int32), 0, grid_size - 1)
-    col_idx = np.clip(((bev_range - y) / res).astype(np.int32), 0, grid_size - 1)
+    row_idx = np.clip(((x_max - x) / res).astype(np.int32), 0, bev_h - 1)
+    col_idx = np.clip(((y - y_min) / res).astype(np.int32), 0, bev_w - 1)
 
-    bev_grid = np.full((5, grid_size, grid_size), 0.0, dtype=np.float32)
+    bev_grid = np.full((5, bev_h, bev_w), 0.0, dtype=np.float32)
 
     if len(z) == 0:
         return bev_grid
 
     # Temp arrays for Z_min tracking (initialized to infinity)
-    z_min_grid = np.full((grid_size, grid_size), 999.0, dtype=np.float32)
+    z_min_grid = np.full((bev_h, bev_w), 999.0, dtype=np.float32)
 
     np.maximum.at(bev_grid[0], (row_idx, col_idx), z)          # Channel 0: Z_max
     np.minimum.at(z_min_grid,  (row_idx, col_idx), z)          # Temp Z_min
@@ -270,6 +289,52 @@ def spawn_cameras(world, vehicle, cfg: dict) -> list:
         sensor = world.spawn_actor(cam_bp, transform, attach_to=vehicle)
         cameras.append(sensor)
     return cameras
+
+
+def spawn_depth_cameras(world, vehicle, cfg: dict) -> list:
+    """
+    Spawns 8 Depth cameras matching RGB camera configuration for Pseudo-LiDAR depth estimation.
+    """
+    blueprint_library = world.get_blueprint_library()
+    depth_bp = blueprint_library.find("sensor.camera.depth")
+    depth_bp.set_attribute("image_size_x", str(cfg["cam_width"]))
+    depth_bp.set_attribute("image_size_y", str(cfg["cam_height"]))
+    depth_bp.set_attribute("fov",          str(cfg["cam_fov"]))
+
+    depth_cameras = []
+    for cam_cfg in CAMERA_CONFIGS:
+        x, y, z   = cam_cfg["pos"]
+        yaw       = cam_cfg["yaw"]
+        transform = carla.Transform(
+            carla.Location(x=x, y=y, z=z),
+            carla.Rotation(yaw=yaw)
+        )
+        sensor = world.spawn_actor(depth_bp, transform, attach_to=vehicle)
+        depth_cameras.append(sensor)
+    return depth_cameras
+
+
+def spawn_semantic_cameras(world, vehicle, cfg: dict) -> list:
+    """
+    Spawns 8 Semantic Segmentation cameras matching RGB camera configuration for HydraNet training.
+    """
+    blueprint_library = world.get_blueprint_library()
+    sem_bp = blueprint_library.find("sensor.camera.semantic_segmentation")
+    sem_bp.set_attribute("image_size_x", str(cfg["cam_width"]))
+    sem_bp.set_attribute("image_size_y", str(cfg["cam_height"]))
+    sem_bp.set_attribute("fov",          str(cfg["cam_fov"]))
+
+    sem_cameras = []
+    for cam_cfg in CAMERA_CONFIGS:
+        x, y, z   = cam_cfg["pos"]
+        yaw       = cam_cfg["yaw"]
+        transform = carla.Transform(
+            carla.Location(x=x, y=y, z=z),
+            carla.Rotation(yaw=yaw)
+        )
+        sensor = world.spawn_actor(sem_bp, transform, attach_to=vehicle)
+        sem_cameras.append(sensor)
+    return sem_cameras
 
 
 def save_camera_metadata(output_dir: str, cfg: dict):
