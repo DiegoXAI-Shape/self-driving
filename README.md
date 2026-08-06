@@ -11,33 +11,29 @@
 
 ## 1. Visión General del Proyecto
 
-* **Objetivo:** Exploración e implementación de una arquitectura híbrida para la planificación espacio-temporal de trayectorias en conducción autónoma. El sistema combina una extracción visual basada en **DINOv2 + LoRA**, recurrencia temporal secuencial con **Temporal Mamba SSM (100x100 BEV Grid)**, condicionamiento por órdenes GPS (**CommandEncoder**), parametrización polinomial cinemática de 5to grado, representación trigonométrica de $Yaw$ $(\sin \theta, \cos \theta)$, desacoplamiento multitarea (**Multi-Head Architecture**), y salvaguardas de control activo en bucle cerrado (Escudo LiDAR y Controlador de Reversa).
-* **Estado Actual:** **Experimento No. 4 Completado — Sub-Métrico y Balance de Clases.** Se logró la mejor métrica histórica de orientación ($1.23^\circ$ de error de $Yaw$) y pérdida de validación sub-unitaria ($0.65$), incorporando mecanismos de control activo en tiempo real (Escudo LiDAR y Controlador de Reversa).
+* **Objetivo:** Exploración e implementación de una arquitectura **Tesla HydraNet** para la percepción multi-vista y planificación espacio-temporal de trayectorias en conducción autónoma puramente basada en cámaras. El sistema combina una extracción visual basada en **DINOv2 + LoRA**, estimación de profundidad **Pseudo-LiDAR (Wang et al., CVPR 2019)**, recurrencia temporal secuencial con **Temporal Mamba SSM (Grilla BEV Asimétrica 200x200)**, condicionamiento por órdenes GPS (**CommandEncoder**), desacoplamiento multitarea (**Tesla HydraNet Heads: Planificación y Segmentación Semántica BEV**), y salvaguardas de control activo en bucle cerrado.
+* **Estado Actual:** **Integración de Arquitectura Tesla HydraNet & Pseudo-LiDAR.** Rediseño 100% libre de sensor LiDAR físico, con recolección de 8 cámaras RGB + Profundidad + Segmentación Semántica en CARLA sobre grilla BEV asimétrica de $200 \times 200$ ($X \in [-10\text{m}, +40\text{m}]$, $0.25\text{m/px}$).
 
 ---
 
-## 2. Arquitectura del Sistema (Experimento 4 Multi-Head)
+## 2. Arquitectura del Sistema (Tesla HydraNet & Pseudo-LiDAR)
 
-El modelo procesa secuencias de tiempo $S=5$ provenientes de un arreglo de 8 cámaras RGB de perspectiva de alta definición, una nube de puntos LiDAR convertida a grilla BEV de 5 canales, y el comando de navegación GPS:
+El modelo procesa secuencias de tiempo $S=5$ provenientes de un arreglo de 8 cámaras RGB de alta definición + Profundidad monocular desproyectada a Pseudo-LiDAR, proyectadas a la grilla BEV asimétrica de 200x200 píxeles, alimentando a Mamba SSM y las distintas cabezas Hydra:
 
 ```mermaid
 graph TD
-    A["8 Cámaras RGB [B, 5, 8, 3, 300, 400]"] --> B["Meta DINOv2 + LoRA (r=8) (LR: 5e-5)"]
-    C["Nube de Puntos LiDAR [B, 5, 400, 400]"] --> D["LidarBEVEncoderV2"]
+    A["8 Cámaras RGB + Profundidad [B, 5, 8, 3, 600, 800]"] --> B["Meta DINOv2 + LoRA (r=8)"]
     E["Command ID (GPS)"] --> F["CommandEncoder (Embedding 64D)"]
     
-    B --> G["CameraBEVProjectionV2"]
-    G --> H["Adaptive Pool 100x100 (16x Speedup)"]
-    H --> I["Temporal Mamba SSM (LR: 3e-4)"]
-    I --> J["Interpolación 400x400 & LiDAR Fusion Neck"]
-    D --> J
+    B --> G["Pseudo-LiDAR 3D Unprojection (Wang et al.)"]
+    G --> H["Grilla BEV Asimétrica 200x200 (40m Adelante @ 0.25m/px)"]
+    H --> I["Temporal Mamba SSM (Recurrencia S=5)"]
     
-    J --> K["MultiHeadBEVPlanningHead"]
+    I --> J["Tensor BEV Espacio-Temporal"]
+    
+    J --> K["Cabeza 1: BEV Planning Head (Polinomio + Yaw + Pedales)"]
+    J --> L["Cabeza 2: BEV Semantic Segmentation Head (Road, Lanes, Vehicles)"]
     F --> K
-    
-    K --> L["Cabeza 1: Polinomio 5to Grado X,Y,Z"]
-    K --> M["Cabeza 2: Yaw Trigonométrico (sin, cos)"]
-    K --> N["Cabeza 3: Pedales (Throttle, Brake) & Speed"]
 ```
 
 ---
