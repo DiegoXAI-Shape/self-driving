@@ -141,7 +141,24 @@ Para resolver definitivamente la conducción en bucle cerrado y alcanzar autonom
    Incorporar una cabeza decodificadora ligera de segmentación semántica de carril (*Road / Lane / Curb*) supervisada por pérdida auxiliar. Esto forzará al adaptador LoRA de DINOv2 a activar sus mapas de atención específicamente sobre las líneas de tráfico y banquetas.
 
 5. **Colección de Datos por Recuperación (*DAgger en CARLA*):**
-   Grabar 2 episodios adicionales en CARLA provocando desvíos intencionales hacia la acera y grabando la maniobra experta de retorno al centro del carril.
+---
+
+## 5. Fundamentos Matemáticos: Desproyección 3D Pseudo-LiDAR (Wang et al., CVPR 2019)
+
+Para sustituir el sensor LiDAR físico sin perder la estructura geométrica 3D, desproyectamos las imágenes de profundidad $D(u, v)$ capturadas por las 8 cámaras al espacio BEV:
+
+### 1. Desproyección de Píxel 2D a Espacio Cámara 3D ($P_{\text{cam}}$)
+Dado un píxel $(u, v)$ con profundidad decodificada en metros $d = D(u, v)$ y la matriz intrínseca $K$:
+
+$$x_{\text{cam}} = \frac{(u - c_x) \cdot d}{f_x}, \quad y_{\text{cam}} = \frac{(v - c_y) \cdot d}{f_y}, \quad z_{\text{cam}} = d$$
+
+### 2. Transformación Extrínseca al Espacio Vehículo Ego ($P_{\text{ego}}$)
+Usando la matriz de pose de la cámara $T_{\text{cam}\to\text{ego}} = [R \mid t]$:
+
+$$P_{\text{ego}} = R_{\text{cam}\to\text{ego}} \cdot P_{\text{cam}} + t_{\text{cam}\to\text{ego}}$$
+
+### 3. Rasterización a Grilla BEV Asimétrica 200x200
+Los puntos $P_{\text{ego}} = (X, Y, Z)$ se filtran en el dominio $X \in [-10\text{m}, +40\text{m}]$ (40m hacia adelante) y $Y \in [-25\text{m}, +25\text{m}]$ a una resolución de $0.25\text{m/px}$, mapeando el centro del vehículo a la **columna 100, fila 160**.
 
 ---
 
@@ -224,3 +241,13 @@ Este proyecto de investigación está siendo co-desarrollado activamente en un e
 
 * **Dirección de Investigación y Supervisión Humana:** Formulación de hipótesis de arquitectura, recolección de datos en CARLA, definición de experimentos, auditoría de fallas en bucle cerrado y dirección estratégica del proyecto.
 * **Asistente IA Agéntico (Antigravity de Google DeepMind / Gemini):** Implementación de código en PyTorch, derivación de funciones de pérdida cinemáticas y trigonométricas, refactorización de pipelines, diagnóstico visual PCA, y diseño de la suite de evaluación.
+
+---
+
+## 11. Referencias Bibliográficas & Recursos
+
+1. **Pseudo-LiDAR from Visual Depth Estimation:** Wang, Y., Chao, W. L., Garg, D., Hariharan, B., Campbell, M., & Weinberger, K. Q. (CVPR 2019). *Pseudo-LiDAR from Visual Depth Estimation: Bridging the Gap in 3D Object Detection for Autonomous Driving.* [arXiv:1812.07179](https://arxiv.org/abs/1812.07179).
+2. **Tesla HydraNet Multi-Task Architecture:** Karpathy, A. (Tesla AI Day 2021). *Multi-camera visual perception and BEV vector space representations for autonomous driving.*
+3. **Mamba Selective State Space Model:** Gu, A., & Dao, T. (2023). *Mamba: Linear-Time Sequence Modeling with Selective State Spaces.* [arXiv:2312.07152](https://arxiv.org/abs/2312.07152).
+4. **DINOv2 Visual Features:** Oquab, M., et al. (2023). *DINOv2: Learning Robust Visual Features without Supervision.* [arXiv:2304.07193](https://arxiv.org/abs/2304.07193).
+5. **CARLA Simulator:** Dosovitskiy, A., Ros, G., Codevilla, F., Lopez, A., & Koltun, V. (CoRL 2017). *CARLA: An Open Urban Driving Simulator.* [carla.org](https://carla.org/).
