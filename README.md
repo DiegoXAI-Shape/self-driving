@@ -235,12 +235,11 @@ python3 scripts/run_carla_closed_loop.py \
 
 ---
 
-## 10. Desarrollo Colaborativo IA + Humano (AI-Native Pair Programming)
+## 10. Agradecimientos y Tecnología
 
-Este proyecto de investigación está siendo co-desarrollado activamente en un esquema de **Pair Programming Agéntico de Inteligencia Artificial**:
+*Este proyecto de investigación es desarrollado con el apoyo y la asistencia técnica de **Google Antigravity AI**.*
 
-* **Dirección de Investigación y Supervisión Humana:** Formulación de hipótesis de arquitectura, recolección de datos en CARLA, definición de experimentos, auditoría de fallas en bucle cerrado y dirección estratégica del proyecto.
-* **Asistente IA Agéntico (Antigravity de Google DeepMind / Gemini):** Implementación de código en PyTorch, derivación de funciones de pérdida cinemáticas y trigonométricas, refactorización de pipelines, diagnóstico visual PCA, y diseño de la suite de evaluación.
+[![Powered by Antigravity](https://img.shields.io/badge/Powered%20by-Google%20Antigravity-4285F4?style=for-the-badge&logo=google&logoColor=white)](https://deepmind.google/)
 
 ---
 
@@ -248,6 +247,8 @@ Este proyecto de investigación está siendo co-desarrollado activamente en un e
 
 1. **Pseudo-LiDAR from Visual Depth Estimation:** Wang, Y., Chao, W. L., Garg, D., Hariharan, B., Campbell, M., & Weinberger, K. Q. (CVPR 2019). *Pseudo-LiDAR from Visual Depth Estimation: Bridging the Gap in 3D Object Detection for Autonomous Driving.* [arXiv:1812.07179](https://arxiv.org/abs/1812.07179).
 2. **Tesla HydraNet Multi-Task Architecture:** Karpathy, A. (Tesla AI Day 2021). *Multi-camera visual perception and BEV vector space representations for autonomous driving.*
-3. **Mamba Selective State Space Model:** Gu, A., & Dao, T. (2023). *Mamba: Linear-Time Sequence Modeling with Selective State Spaces.* [arXiv:2312.07152](https://arxiv.org/abs/2312.07152).
-4. **DINOv2 Visual Features:** Oquab, M., et al. (2023). *DINOv2: Learning Robust Visual Features without Supervision.* [arXiv:2304.07193](https://arxiv.org/abs/2304.07193).
-5. **CARLA Simulator:** Dosovitskiy, A., Ros, G., Codevilla, F., Lopez, A., & Koltun, V. (CoRL 2017). *CARLA: An Open Urban Driving Simulator.* [carla.org](https://carla.org/).
+3. **UniAD End-to-End Planning & Offset Cumsum Heads:** Hu, Y., et al. (CVPR 2023). *Planning-oriented Autonomous Driving.* [arXiv:2303.05553](https://arxiv.org/abs/2303.05553).
+4. **Waymo Motion Transformer (MTR):** Shi, S., et al. (NeurIPS 2022). *Motion Transformer with Global Intention Localization and Local Movement Refinement.* [arXiv:2209.13508](https://arxiv.org/abs/2209.13508).
+5. **Mamba Selective State Space Model:** Gu, A., & Dao, T. (2023). *Mamba: Linear-Time Sequence Modeling with Selective State Spaces.* [arXiv:2312.07152](https://arxiv.org/abs/2312.07152).
+6. **DINOv2 Visual Features:** Oquab, M., et al. (2023). *DINOv2: Learning Robust Visual Features without Supervision.* [arXiv:2304.07193](https://arxiv.org/abs/2304.07193).
+7. **CARLA Simulator:** Dosovitskiy, A., Ros, G., Codevilla, F., Lopez, A., & Koltun, V. (CoRL 2017). *CARLA: An Open Urban Driving Simulator.* [carla.org](https://carla.org/).
