@@ -23,7 +23,7 @@ El código debe mantenerse limpio y estrictamente modularizado en `models/`:
   * `CameraBEVNeck`: Cuello convolucional de refinamiento BEV exclusivo de cámaras ($64 \to 128$ canales).
 * **`models/utils/mamba_blocks.py`:**
   * `TemporalMambaBlock` y `TemporalMamba`: Bloques de recurrencia secuencial 1D para secuencias temporales ($S=5$).
-* **`models/modules/BEV_perception_v2.py`:**
+* **`models/modules/BEV_perception.py`:**
   * Red principal `BEVPerceptionNetV2`: Pipeline **exclusivo de cámaras** (sin fusión LiDAR en la red neuronal).
 * **`models/modules/BEV_planning.py`:**
   * `MultiHeadBEVPlanningHead`: Cabeza multitarea con 3 salidas:
@@ -43,12 +43,14 @@ El código debe mantenerse limpio y estrictamente modularizado en `models/`:
 
 ---
 
-## 4. Estándar de Datos y Recolección (DAgger)
+## 4. Estándar de Datos y Recolección (DAgger / HydraSkrill)
 
-* **Arreglo de Cámaras:** 8 Cámaras RGB ($800 \times 600$, $\text{FOV}=100^\circ$) montadas según configuración Tesla Model 3.
-* **Formato de Control (`control.csv`):** `[frame, throttle, brake, steer, hand_brake, reverse, is_recovery]`.
-* **Muestras de Recuperación (`is_recovery`):** Marcar con `1.0` en DAgger durante maniobras de corrección manual.
-* **Ponderación de Pérdida:** Multiplicador de $1.5\times / 3.0\times$ en el cargador de datos (`dataset.py`) para giros, frenado y muestras de recuperación.
+* **Arreglo de Cámaras:** 8 Cámaras RGB + 8 Cámaras de Profundidad + 8 Cámaras Semánticas ($800 \times 600$, $\text{FOV}=100^\circ$) montadas según configuración Tesla Model 3.
+* **Formato de Control (`control.csv`):** `[frame, timestamp_sec, throttle, brake, steer, hand_brake, reverse, is_recovery]`.
+* **Perturbaciones Suaves DAgger:** Desvíos laterales acotados ($\pm 0.15$ a $\pm 0.25$ rad) para registrar correcciones de carril fluidas sin colisiones fatales.
+* **Distancia de Seguimiento en CARLA Traffic Manager:** Configurar `distance_to_leading_vehicle` a $3.5\text{m}$ (equivalente a $2-3\text{m}$ de margen real entre parachoques).
+* **Estrategia de Recolección Secuencial:** Recolectar datos por lotes independientes (`--mode normal` para $75-80\%$ de datos expertos limpios y `--mode dagger` para $20-25\%$ de maniobras de recuperación).
+* **Ponderación de Pérdida:** Multiplicador de $1.5\times / 3.0\times$ en el cargador de datos (`dataset.py`) para giros, frenado y muestras de recuperación (`is_recovery == 1.0`).
 
 ---
 

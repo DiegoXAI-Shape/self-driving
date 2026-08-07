@@ -31,7 +31,7 @@ cv2.setNumThreads(0)
 
 # Add project root to sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from models.modules.BEV_perception_v2 import BEVPerceptionNetV2
+from models.modules.BEV_perception import BEVPerceptionNetV2
 
 try:
     import carla
@@ -149,7 +149,6 @@ class CarlaClosedLoopRunner:
         
         # FIFO Buffer S=5
         self.fifo_cams = collections.deque(maxlen=5)
-        self.fifo_lidar = collections.deque(maxlen=5)
 
     def _load_model(self, checkpoint_path):
         if not os.path.exists(checkpoint_path):
@@ -176,31 +175,6 @@ class CarlaClosedLoopRunner:
         model.eval()
         return model
 
-    def build_lidar_bev_channel(self, points, grid_size=400, resolution=0.25):
-        """Converts raw LiDAR point cloud into 5-channel BEV grid [5, 400, 400]."""
-        bev = np.zeros((5, grid_size, grid_size), dtype=np.float32)
-        if points is None or len(points) == 0:
-            return bev
-            
-        x = points[:, 0]
-        y = points[:, 1]
-        z = points[:, 2]
-        intensity = points[:, 3] if points.shape[1] > 3 else np.ones_like(x)
-        
-        valid = (x >= 0) & (x < 100) & (np.abs(y) < 50) & (z >= -3) & (z < 5)
-        x, y, z, intensity = x[valid], y[valid], z[valid], intensity[valid]
-        
-        px = np.clip(np.int32(x / resolution), 0, grid_size - 1)
-        py = np.clip(np.int32((y + 50.0) / resolution), 0, grid_size - 1)
-        
-        for i in range(len(x)):
-            bev[0, px[i], py[i]] = max(bev[0, px[i], py[i]], z[i])  # z_max
-            bev[1, px[i], py[i]] = min(bev[1, px[i], py[i]], z[i])  # z_min
-            bev[2, px[i], py[i]] += z[i]                             # z_sum
-            bev[3, px[i], py[i]] += 1.0                             # density
-            bev[4, px[i], py[i]] = max(bev[4, px[i], py[i]], intensity[i]) # intensity
-            
-        return bev
 
     def setup_sensors(self, world, vehicle):
         bp_lib = world.get_blueprint_library()
@@ -231,7 +205,7 @@ class CarlaClosedLoopRunner:
                 
             cam_actor.listen(make_callback(idx))
 
-        # 2. Spawn 1 LiDAR Sensor
+        # 2. Spawn 1 LiDAR Sensor (Purely for Deterministic Emergency Safety Shield)
         lidar_bp = bp_lib.find("sensor.lidar.ray_cast")
         lidar_bp.set_attribute("range", "50.0")
         lidar_bp.set_attribute("channels", "64")
@@ -248,7 +222,7 @@ class CarlaClosedLoopRunner:
             self.lidar_raw_points = points[:, :4]
             
         lidar_actor.listen(lidar_callback)
-        print(f"[CARLA] Successfully attached 8 RGB Cameras + 1 LiDAR Sensor to Ego Vehicle.")
+        print(f"[CARLA] Successfully attached 8 RGB Cameras + 1 LiDAR (Safety Shield) to Ego Vehicle.")
 
     def run(self):
         target_host = resolve_carla_host(self.args.host)
@@ -315,18 +289,14 @@ class CarlaClosedLoopRunner:
                     continue
                     
                 curr_cams = np.stack(self.cam_buffers, axis=0)
-                curr_lidar_bev = self.build_lidar_bev_channel(self.lidar_raw_points)
                 
                 self.fifo_cams.append(curr_cams)
-                self.fifo_lidar.append(curr_lidar_bev)
                 
                 while len(self.fifo_cams) < 5:
                     self.fifo_cams.append(curr_cams)
-                    self.fifo_lidar.append(curr_lidar_bev)
                     
                 cams_seq_np = np.stack(list(self.fifo_cams), axis=0)
                 cam_tensor = torch.from_numpy(cams_seq_np).unsqueeze(0).to(self.device)
-                lidar_bev = torch.from_numpy(curr_lidar_bev).unsqueeze(0).to(self.device)
                 
                 # Real 8-Camera Intrinsics and Extrinsics (matching CARLADataset)
                 fov_rad = np.radians(100.0)
@@ -361,7 +331,7 @@ class CarlaClosedLoopRunner:
                 command_tensor = torch.tensor([command_val], dtype=torch.long, device=self.device)
                 
                 with torch.no_grad():
-                    pred_out = self.model(cam_tensor, lidar_bev, extrinsics, intrinsics, command=command_tensor)
+                    pred_out = self.model(cam_tensor, extrinsics, intrinsics, command=command_tensor)
                     if isinstance(pred_out, dict):
                         pred_wps = pred_out["pred_waypoints"]
                         model_speed = pred_out["pred_speed"].item()

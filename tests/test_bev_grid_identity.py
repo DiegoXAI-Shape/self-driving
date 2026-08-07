@@ -23,7 +23,7 @@ import numpy as np
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from models.utils.carla_data_collector import CONFIG, lidar_to_bev_grid_vectorized as main_bev_func
-from scripts.collect_dagger_data import lidar_to_bev_grid_vectorized as dagger_bev_func
+from scripts.collect_data import decode_carla_depth
 
 
 def test_bev_identity_and_centering():

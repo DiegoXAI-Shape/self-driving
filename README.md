@@ -183,7 +183,7 @@ Helioskrill_vim_train/
 ├── models/
 │   ├── dataset.py                # CARLADataset, Augmentation y pesos x1.5
 │   ├── modules/
-│   │   ├── BEV_perception_v2.py  # Red principal DINOv2 + GroupNorm + Temporal Mamba (100x100)
+│   │   ├── BEV_perception.py     # Red principal DINOv2 + GroupNorm + Temporal Mamba (100x100)
 │   │   ├── BEV_planning.py       # Cabeza Multi-Head (Polinomial, Yaw Trig, Pedales)
 │   │   └── BEV_sensors.py        # Filtro de Kalman Extendido (EKF telemetry)
 │   └── utils/
@@ -192,7 +192,7 @@ Helioskrill_vim_train/
 ├── visualizations/
 │   └── visualize.py              # Suite unificada CLI (--mode bev, data, pca, metrics)
 ├── scripts/
-│   ├── train_exp4.py             # Pipeline de entrenamiento Experimento 4
+│   ├── train.py                  # Pipeline de entrenamiento unificado
 │   ├── train_exp3.py             # Pipeline de entrenamiento Experimento 3
 │   └── run_carla_closed_loop.py  # Inferencia en tiempo real con Escudo LiDAR + Reversa
 ├── .gitignore                    # Filtros de datos, checkpoints y logs

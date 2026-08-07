@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from models.modules.BEV_perception_v2 import BEVPerceptionNetV2
+from models.modules.BEV_perception import BEVPerceptionNetV2
 from models.dataset import CARLADataset, compute_planning_metrics, compute_temporal_metrics_complete
 
 
