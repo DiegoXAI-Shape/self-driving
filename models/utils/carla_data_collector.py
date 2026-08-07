@@ -83,8 +83,8 @@ CONFIG = {
     "frames_per_episode": 600,
     "warmup_frames": 40,
 
-    "num_vehicles": 40,
-    "num_walkers": 25,
+    "num_vehicles": 15,
+    "num_walkers": 8,
 
     "cam_width": 800,
     "cam_height": 600,
@@ -188,7 +188,7 @@ def open_csv_writers(paths: dict) -> dict:
     loc_file = open(loc_path, "w", newline="", encoding="utf-8")
     loc_writer = csv.writer(loc_file)
     loc_writer.writerow([
-        "frame", "gps_lat", "gps_lon", "gps_alt",
+        "frame", "timestamp_sec", "gps_lat", "gps_lon", "gps_alt",
         "ego_x", "ego_y", "ego_z", "ego_yaw", "ego_pitch", "ego_roll",
         "imu_accel_x", "imu_accel_y", "imu_accel_z",
         "imu_gyro_x",  "imu_gyro_y",  "imu_gyro_z", "speed_mps"
@@ -198,7 +198,7 @@ def open_csv_writers(paths: dict) -> dict:
     plan_path = os.path.join(paths["planning"], "waypoints.csv")
     plan_file = open(plan_path, "w", newline="", encoding="utf-8")
     plan_writer = csv.writer(plan_file)
-    wp_cols = ["frame"]
+    wp_cols = ["frame", "timestamp_sec"]
     for i in range(CONFIG["num_waypoints"]):
         wp_cols += [f"wp_{i}_rel_x", f"wp_{i}_rel_y", f"wp_{i}_rel_z", f"wp_{i}_rel_yaw"]
     plan_writer.writerow(wp_cols)
@@ -207,7 +207,8 @@ def open_csv_writers(paths: dict) -> dict:
     ctrl_path = os.path.join(paths["control"], "control.csv")
     ctrl_file = open(ctrl_path, "w", newline="", encoding="utf-8")
     ctrl_writer = csv.writer(ctrl_file)
-    ctrl_writer.writerow(["frame", "throttle", "brake", "steer", "hand_brake", "reverse", "is_recovery"])
+    ctrl_writer.writerow(["frame", "timestamp_sec", "throttle", "brake", "steer", "hand_brake", "reverse", "is_recovery"])
+    writers["control"] = (ctrl_file, ctrl_writer)
     writers["control"] = (ctrl_file, ctrl_writer)
 
     pred_path = os.path.join(paths["prediction"], "actors.csv")
@@ -386,10 +387,15 @@ def spawn_ambient_traffic(client, world, num_vehicles: int, num_walkers: int, tr
     vehicle_blueprints = blueprints.filter("vehicle.*")
     walker_blueprints = blueprints.filter("walker.pedestrian.*")
 
-    vehicle_blueprints = [x for x in vehicle_blueprints if int(x.get_attribute("number_of_wheels")) == 4]
-    vehicle_blueprints = [x for x in vehicle_blueprints if not x.id.endswith("isetta")]
-    vehicle_blueprints = [x for x in vehicle_blueprints if not x.id.endswith("carlacola")]
-    vehicle_blueprints = [x for x in vehicle_blueprints if not x.id.endswith("cybertruck")]
+    excluded_keywords = [
+        "carlacola", "firetruck", "isetta", "bus", "truck", "van",
+        "ambulance", "microlino", "cybertruck", "sprinter", "gazelle"
+    ]
+    vehicle_blueprints = [
+        bp for bp in vehicle_blueprints
+        if int(bp.get_attribute("number_of_wheels")) == 4
+        and not any(k in bp.id.lower() for k in excluded_keywords)
+    ]
 
     spawn_points = world.get_map().get_spawn_points()
     spawn_points = [sp for sp in spawn_points if sp.location.distance(ego_spawn_point.location) > 10.0]
@@ -409,7 +415,10 @@ def spawn_ambient_traffic(client, world, num_vehicles: int, num_walkers: int, tr
         if vehicle is not None:
             vehicle.set_autopilot(True, traffic_manager.get_port())
             traffic_manager.auto_lane_change(vehicle, True)
-            traffic_manager.ignore_lights_percentage(vehicle, 10.0)
+            traffic_manager.random_left_lanechange_percentage(vehicle, 15.0)
+            traffic_manager.random_right_lanechange_percentage(vehicle, 15.0)
+            traffic_manager.distance_to_leading_vehicle(vehicle, 4.0)
+            traffic_manager.vehicle_percentage_speed_difference(vehicle, 5.0)  # 5% slower than limit
             vehicles_list.append(vehicle)
 
     walker_spawn_points = spawn_points[num_vehicles:]
@@ -562,7 +571,8 @@ def run_episode(client, world, episode_id: int, cfg: dict):
     traffic_manager = client.get_trafficmanager()
     vehicle.set_autopilot(True, traffic_manager.get_port())
     traffic_manager.ignore_lights_percentage(vehicle, 0.0)
-    traffic_manager.distance_to_leading_vehicle(vehicle, 3.0)
+    traffic_manager.ignore_signs_percentage(vehicle, 0.0)
+    traffic_manager.distance_to_leading_vehicle(vehicle, cfg.get("min_dist", 3.5))
 
     ambient_vehicles, ambient_walkers, ambient_controllers = spawn_ambient_traffic(
         client, world,
